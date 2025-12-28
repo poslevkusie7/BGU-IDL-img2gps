@@ -1,3 +1,5 @@
 .vscode
-data/
+data/images
 .DS_Store
+*.pyc
+

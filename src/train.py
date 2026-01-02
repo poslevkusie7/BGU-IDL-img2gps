@@ -73,14 +73,13 @@ def train():
 
     # 4. Training Loop
     print(f"Starting training on {DEVICE}...")
-    for epoch in range(EPOCHS):
+    pbar = tqdm(range(EPOCHS), desc="Training Progress")    
+    for epoch in pbar:
         model.train()
         train_loss = 0.0
         
-        train_pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [train]", leave=False)
-        for images, targets in train_pbar:
+        for images, targets in train_loader:
             images, targets = images.to(DEVICE), targets.to(DEVICE)
-            
             optimizer.zero_grad()
             outputs = model(images)
             loss = criterion(outputs, targets)
@@ -93,15 +92,12 @@ def train():
         val_loss = 0.0
         meter_errors = []
         
-        val_pbar = tqdm(val_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [val]", leave=False)
         with torch.no_grad():
-            for images, targets in val_pbar:
+            for images, targets in val_loader:
                 images, targets = images.to(DEVICE), targets.to(DEVICE)
                 outputs = model(images)
-                
                 val_loss += criterion(outputs, targets).item()
                 
-                # Calculate error in meters
                 m_err = haversine_distance(
                     outputs.cpu().numpy(), targets.cpu().numpy(),
                     full_dataset.lat_mean, full_dataset.lat_std,
@@ -113,9 +109,16 @@ def train():
         avg_val_loss = val_loss / len(val_loader)
         avg_meter_error = np.mean(meter_errors)
 
-        print(f"Epoch [{epoch+1}/{EPOCHS}]")
-        print(f"  Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
-        print(f"  Average Error: {avg_meter_error:.2f} meters")
+        pbar.set_postfix({
+                "Epoch": epoch + 1,
+                "T-Loss": f"{avg_train_loss:.2e}",
+                "V-Loss": f"{avg_val_loss:.2e}",
+                "Err(m)": f"{avg_meter_error:.2f}"
+        })
+
+        # print(f"Epoch [{epoch+1}/{EPOCHS}]")
+        # print(f"  Train Loss: {avg_train_loss:.4e} | Val Loss: {avg_val_loss:.4e}")
+        # print(f"  Average Error: {avg_meter_error:.2f} meters")
 
     # 6. Save Model & Stats
     torch.save({

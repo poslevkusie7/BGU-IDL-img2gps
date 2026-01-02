@@ -16,7 +16,7 @@ CSV_PATH = "data/metadata.csv"
 IMG_DIR = "data/images"
 BATCH_SIZE = 16
 LEARNING_RATE = 0.0005  # Slightly lower LR for fine-tuning
-EPOCHS = 20
+EPOCHS = 100
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 os.makedirs("checkpoints", exist_ok=True)

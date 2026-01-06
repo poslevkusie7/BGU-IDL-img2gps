@@ -2,6 +2,7 @@ import os
 import torch
 import pandas as pd
 from PIL import Image
+from typing import Optional, Dict
 from torch.utils.data import Dataset
 
 
@@ -24,7 +25,7 @@ class CampusGPSDataset(Dataset):
         csv_file: str,
         img_dir: str,
         transform=None,
-        stats: dict | None = None,
+        stats: Optional[Dict] = None,
         compute_stats: bool = False,
         return_raw: bool = False,
         filename_col: str = "filename",

@@ -1,21 +1,29 @@
 import os
-from typing import Optional, Dict, Sequence
+from typing import Optional, Dict, Sequence, Tuple
 
+import numpy as np
 import pandas as pd
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
 
+EARTH_R = 6378137.0  # meters (WGS84-ish)
+
+
 class CampusGPSDataset(Dataset):
     """
+    Dataset for Image -> GPS regression, using a LOCAL METERS coordinate system.
+
     CSV columns expected:
       - filename
-      - region (optional, will be kept but not required)
       - latitude
       - longitude
+      - region (optional)
 
-    Targets returned are z-score normalized using train-only stats.
+    Target:
+      - returns normalized (x, y) in meters relative to an origin (lat0, lon0)
+      - stats MUST be computed on train only, then reused for val/test (no leakage)
     """
 
     def __init__(
@@ -63,34 +71,56 @@ class CampusGPSDataset(Dataset):
         if indices is not None:
             self.df = self.df.iloc[list(indices)].reset_index(drop=True)
 
-        # Stats handling
+        # -----------------------------
+        # Stats handling (meters system)
+        # -----------------------------
         if stats is not None:
-            self.lat_mean = float(stats["lat_mean"])
-            self.lat_std = float(stats["lat_std"])
-            self.lon_mean = float(stats["lon_mean"])
-            self.lon_std = float(stats["lon_std"])
+            # Use train stats (for val/test)
+            self.lat0 = float(stats["lat0"])
+            self.lon0 = float(stats["lon0"])
+            self.x_mean = float(stats["x_mean"])
+            self.x_std = float(stats["x_std"])
+            self.y_mean = float(stats["y_mean"])
+            self.y_std = float(stats["y_std"])
+            stats_source = "provided (train stats)"
         else:
+            # Compute stats (train only)
             if not compute_stats:
                 raise ValueError(
                     "stats is None but compute_stats=False. "
-                    "For val/test, pass train stats. For train, set compute_stats=True."
+                    "For val/test, pass stats from train. For train, set compute_stats=True."
                 )
-            self.lat_mean = float(self.df[lat_col].mean())
-            self.lat_std = float(self.df[lat_col].std())
-            self.lon_mean = float(self.df[lon_col].mean())
-            self.lon_std = float(self.df[lon_col].std())
+
+            # Origin is the mean lat/lon of THIS SPLIT (train split)
+            self.lat0 = float(self.df[lat_col].mean())
+            self.lon0 = float(self.df[lon_col].mean())
+
+            # Convert all points to meters relative to origin, then compute mean/std
+            x, y = self.latlon_to_xy_m(
+                self.df[lat_col].values,
+                self.df[lon_col].values,
+                self.lat0,
+                self.lon0
+            )
+
+            self.x_mean = float(np.mean(x))
+            self.y_mean = float(np.mean(y))
+            self.x_std = float(np.std(x))
+            self.y_std = float(np.std(y))
+            stats_source = "computed (this split)"
 
         # Guard against zero std
         eps = 1e-8
-        if abs(self.lat_std) <= eps:
-            self.lat_std = 1.0
-        if abs(self.lon_std) <= eps:
-            self.lon_std = 1.0
+        if abs(self.x_std) <= eps:
+            self.x_std = 1.0
+        if abs(self.y_std) <= eps:
+            self.y_std = 1.0
 
         print(f"[Dataset] Loaded {len(self.df)} samples from {csv_file}")
-        print(f"[Dataset] GPS center: lat={self.lat_mean:.6f}, lon={self.lon_mean:.6f}")
+        print(f"[Dataset] Origin ({stats_source}): lat0={self.lat0:.6f}, lon0={self.lon0:.6f}")
+        print(f"[Dataset] XY std (m): x_std={self.x_std:.3f}, y_std={self.y_std:.3f}")
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.df)
 
     def _resolve_image_path(self, filename: str) -> str:
@@ -101,7 +131,7 @@ class CampusGPSDataset(Dataset):
             return filename
         return os.path.join(self.img_dir, filename)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int):
         row = self.df.iloc[idx]
         img_path = self._resolve_image_path(row[self.filename_col])
 
@@ -114,24 +144,65 @@ class CampusGPSDataset(Dataset):
         lat = float(row[self.lat_col])
         lon = float(row[self.lon_col])
 
-        # z-score normalize
-        lat_norm = (lat - self.lat_mean) / self.lat_std
-        lon_norm = (lon - self.lon_mean) / self.lon_std
-        target = torch.tensor([lat_norm, lon_norm], dtype=torch.float32)
+        # Convert to local meters
+        x_m, y_m = self.latlon_to_xy_m(lat, lon, self.lat0, self.lon0)
+
+        # Normalize
+        x_norm = (x_m - self.x_mean) / self.x_std
+        y_norm = (y_m - self.y_mean) / self.y_std
+
+        target = torch.tensor([x_norm, y_norm], dtype=torch.float32)
 
         if self.transform is not None:
             image = self.transform(image)
 
         if self.return_raw:
-            raw = torch.tensor([lat, lon], dtype=torch.float32)
-            return image, target, raw
+            raw_latlon = torch.tensor([lat, lon], dtype=torch.float32)
+            raw_xy = torch.tensor([float(x_m), float(y_m)], dtype=torch.float32)
+            return image, target, raw_latlon, raw_xy
 
         return image, target
 
     def get_stats(self) -> Dict[str, float]:
         return {
-            "lat_mean": self.lat_mean,
-            "lat_std": self.lat_std,
-            "lon_mean": self.lon_mean,
-            "lon_std": self.lon_std,
+            "lat0": self.lat0,
+            "lon0": self.lon0,
+            "x_mean": self.x_mean,
+            "x_std": self.x_std,
+            "y_mean": self.y_mean,
+            "y_std": self.y_std,
         }
+
+    @staticmethod
+    def latlon_to_xy_m(lat, lon, lat0: float, lon0: float) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Equirectangular approximation (good for small areas like a campus).
+        Returns x,y in meters relative to origin (lat0, lon0).
+
+        x: Easting meters
+        y: Northing meters
+        """
+        lat = np.asarray(lat, dtype=np.float64)
+        lon = np.asarray(lon, dtype=np.float64)
+
+        dlat = np.radians(lat - lat0)
+        dlon = np.radians(lon - lon0)
+
+        x = EARTH_R * dlon * np.cos(np.radians(lat0))
+        y = EARTH_R * dlat
+        return x, y
+
+    @staticmethod
+    def xy_m_to_latlon(x, y, lat0: float, lon0: float) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Inverse of latlon_to_xy_m.
+        """
+        x = np.asarray(x, dtype=np.float64)
+        y = np.asarray(y, dtype=np.float64)
+
+        dlat = y / EARTH_R
+        dlon = x / (EARTH_R * np.cos(np.radians(lat0)))
+
+        lat = lat0 + np.degrees(dlat)
+        lon = lon0 + np.degrees(dlon)
+        return lat, lon

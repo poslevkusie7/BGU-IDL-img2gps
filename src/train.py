@@ -24,23 +24,17 @@ TRAIN_FRAC = 0.8
 os.makedirs("checkpoints", exist_ok=True)
 
 
-def haversine_distance(pred, target, lat_mean, lat_std, lon_mean, lon_std):
+def meter_distance_xy(pred, target, stats):
     pred = pred.astype(np.float64)
     target = target.astype(np.float64)
 
-    p_lat = (pred[:, 0] * lat_std) + lat_mean
-    p_lon = (pred[:, 1] * lon_std) + lon_mean
-    t_lat = (target[:, 0] * lat_std) + lat_mean
-    t_lon = (target[:, 1] * lon_std) + lon_mean
+    px = pred[:, 0] * stats["x_std"] + stats["x_mean"]
+    py = pred[:, 1] * stats["y_std"] + stats["y_mean"]
+    tx = target[:, 0] * stats["x_std"] + stats["x_mean"]
+    ty = target[:, 1] * stats["y_std"] + stats["y_mean"]
 
-    R = 6371000.0
-    phi1, phi2 = np.radians(p_lat), np.radians(t_lat)
-    dphi = np.radians(t_lat - p_lat)
-    dlambda = np.radians(t_lon - p_lon)
-
-    a = np.sin(dphi / 2) ** 2 + np.cos(phi1) * np.cos(phi2) * np.sin(dlambda / 2) ** 2
-    c = 2 * R * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
-    return float(np.mean(c))
+    dist = np.sqrt((px - tx) ** 2 + (py - ty) ** 2)
+    return float(np.mean(dist))
 
 
 def make_split_indices(csv_path: str, train_frac: float = 0.8, seed: int = 42):
@@ -145,12 +139,7 @@ def train():
                     outputs = model(images)
                     val_loss += criterion(outputs, targets).item()
 
-                m_err = haversine_distance(
-                    outputs.cpu().numpy(),
-                    targets.cpu().numpy(),
-                    train_stats["lat_mean"], train_stats["lat_std"],
-                    train_stats["lon_mean"], train_stats["lon_std"],
-                )
+                m_err = meter_distance_xy(outputs.cpu().numpy(), targets.cpu().numpy(), train_stats)
                 meter_errors.append(m_err)
 
         avg_train_loss = train_loss / max(1, len(train_loader))

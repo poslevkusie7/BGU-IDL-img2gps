@@ -1,4 +1,3 @@
-# train.py
 import os
 import numpy as np
 import torch
@@ -8,6 +7,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from tqdm import tqdm
 import pandas as pd
+from torch.amp import GradScaler, autocast
 
 from .dataset import CampusGPSDataset
 from .model import CampusGPSModel
@@ -25,10 +25,6 @@ os.makedirs("checkpoints", exist_ok=True)
 
 
 def haversine_distance(pred, target, lat_mean, lat_std, lon_mean, lon_std):
-    """
-    pred, target: numpy arrays of shape (N, 2) in normalized z-score space
-    returns mean distance in meters
-    """
     pred = pred.astype(np.float64)
     target = target.astype(np.float64)
 
@@ -48,13 +44,6 @@ def haversine_distance(pred, target, lat_mean, lat_std, lon_mean, lon_std):
 
 
 def make_split_indices(csv_path: str, train_frac: float = 0.8, seed: int = 42):
-    """
-    Leak-free index split.
-    Default: random split by rows.
-
-    If you want to split by region (stronger generalization test),
-    see the commented block below.
-    """
     df = pd.read_csv(csv_path).reset_index(drop=True)
     n = len(df)
     rng = np.random.default_rng(seed)
@@ -63,29 +52,18 @@ def make_split_indices(csv_path: str, train_frac: float = 0.8, seed: int = 42):
     train_size = int(train_frac * n)
     train_idx = perm[:train_size].tolist()
     val_idx = perm[train_size:].tolist()
-
-    # --- OPTIONAL: region-based split (hold out entire regions) ---
-    # if "region" in df.columns:
-    #     regions = df["region"].astype(str).fillna("NA")
-    #     unique_regions = regions.unique().tolist()
-    #     rng.shuffle(unique_regions)
-    #     cut = int(train_frac * len(unique_regions))
-    #     train_regions = set(unique_regions[:cut])
-    #     train_idx = df.index[regions.isin(train_regions)].tolist()
-    #     val_idx = df.index[~regions.isin(train_regions)].tolist()
-
     return train_idx, val_idx
 
 
 def train():
     best_error = float("inf")
 
-    # Transforms (keep your logic, but make order PIL-safe)
+    # Transforms: PIL ops first, then ToTensor, then Normalize
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
-        transforms.ToTensor(),
         transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.05),
         transforms.GaussianBlur(kernel_size=(3, 3), sigma=(0.1, 2.0)),
+        transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
     ])
 
@@ -106,16 +84,20 @@ def train():
         indices=val_idx, stats=train_stats,
         filename_col="filename", lat_col="latitude", lon_col="longitude"
     )
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True,
-                            num_workers=4, pin_memory=True, persistent_workers=True)
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, 
-                            num_workers=4, pin_memory=True, persistent_workers=True)
+
+    train_loader = DataLoader(
+        train_dataset, batch_size=BATCH_SIZE, shuffle=True,
+        num_workers=4, pin_memory=True, persistent_workers=True
+    )
+    val_loader = DataLoader(
+        val_dataset, batch_size=BATCH_SIZE, shuffle=False,
+        num_workers=4, pin_memory=True, persistent_workers=True
+    )
 
     # Model + loss
     model = CampusGPSModel(freeze_backbone=False).to(DEVICE)
     criterion = nn.HuberLoss(delta=1.0)
 
-    # Optimizer (same idea as yours: smaller LR early, higher in head)
     optimizer = optim.Adam([
         {"params": model.backbone.conv1.parameters(), "lr": 1e-6},
         {"params": model.backbone.layer1.parameters(), "lr": 1e-6},
@@ -125,6 +107,7 @@ def train():
         {"params": model.backbone.fc.parameters(), "lr": 5e-4},
     ])
 
+    scaler = GradScaler("cuda", enabled=(DEVICE.type == "cuda"))
     print(f"Starting training on {DEVICE}...")
     pbar = tqdm(range(EPOCHS), desc="Training Progress")
 
@@ -133,14 +116,18 @@ def train():
         train_loss = 0.0
 
         for images, targets in train_loader:
-            images = images.to(DEVICE)
-            targets = targets.to(DEVICE)
+            images = images.to(DEVICE, non_blocking=True)
+            targets = targets.to(DEVICE, non_blocking=True)
 
             optimizer.zero_grad(set_to_none=True)
-            outputs = model(images)
-            loss = criterion(outputs, targets)
-            loss.backward()
-            optimizer.step()
+
+            with autocast("cuda", enabled=(DEVICE.type == "cuda")):
+                outputs = model(images)
+                loss = criterion(outputs, targets)
+
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
             train_loss += loss.item()
 
@@ -151,11 +138,12 @@ def train():
 
         with torch.no_grad():
             for images, targets in val_loader:
-                images = images.to(DEVICE)
-                targets = targets.to(DEVICE)
+                images = images.to(DEVICE, non_blocking=True)
+                targets = targets.to(DEVICE, non_blocking=True)
 
-                outputs = model(images)
-                val_loss += criterion(outputs, targets).item()
+                with autocast("cuda", enabled=(DEVICE.type == "cuda")):
+                    outputs = model(images)
+                    val_loss += criterion(outputs, targets).item()
 
                 m_err = haversine_distance(
                     outputs.cpu().numpy(),
@@ -176,7 +164,6 @@ def train():
             "Err(m)": f"{avg_meter_error:.2f}",
         })
 
-        # Save best model (save train stats for inference)
         if avg_meter_error < best_error:
             best_error = avg_meter_error
             torch.save({

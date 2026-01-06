@@ -1,34 +1,33 @@
-import torch
+# model.py
 import torch.nn as nn
 from torchvision import models
+from torchvision.models import ResNet50_Weights
+
 
 class CampusGPSModel(nn.Module):
-    def __init__(self, freeze_backbone=True):
-        super(CampusGPSModel, self).__init__()
-        
-        # 1. Upgrade to ResNet50
-        self.backbone = models.resnet50(weights='DEFAULT')
-        
-        # 2. Freeze the backbone initially
+    def __init__(self, freeze_backbone: bool = True):
+        super().__init__()
+
+        # Backbone
+        self.backbone = models.resnet50(weights=ResNet50_Weights.DEFAULT)
+
         if freeze_backbone:
-            for param in self.backbone.parameters():
-                param.requires_grad = False
-        
-        # 3. Head 
+            for p in self.backbone.parameters():
+                p.requires_grad = False
+
+        # Replace FC head
         num_features = self.backbone.fc.in_features
-        
         self.backbone.fc = nn.Sequential(
             nn.Linear(num_features, 512),
-            nn.BatchNorm1d(512), # Helps stabilize training
-            nn.ReLU(),
-            nn.Dropout(0.3),     # 30% of neurons switched off per batch
-            
+            nn.BatchNorm1d(512),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.3),
+
             nn.Linear(512, 128),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
             nn.Dropout(0.2),
-            
-            nn.Linear(128, 2),    # Final Output: [Lat, Lon]
-            nn.Tanh()
+
+            nn.Linear(128, 2),  # [lat_norm, lon_norm] (NO tanh)
         )
 
     def forward(self, x):

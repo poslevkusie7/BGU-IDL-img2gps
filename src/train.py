@@ -80,7 +80,7 @@ def train():
         {'params': model.backbone.layer4.parameters(), 'lr': 1e-5},
         {'params': model.backbone.fc.parameters(), 'lr': 5e-4}
     ])
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
+    # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
     # optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     # optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=LEARNING_RATE)
 
@@ -121,7 +121,7 @@ def train():
         avg_train_loss = train_loss / len(train_loader)
         avg_val_loss = val_loss / len(val_loader)
         avg_meter_error = np.mean(meter_errors)
-        scheduler.step(avg_meter_error)
+        # scheduler.step(avg_meter_error)
 
         pbar.set_postfix({
                 "Epoch": epoch + 1,

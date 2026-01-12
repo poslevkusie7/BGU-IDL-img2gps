@@ -58,12 +58,30 @@ def seed_everything(seed=42):
     torch.cuda.manual_seed_all(seed)
 
 
+def compute_batch_metrics(cls_logits, labels, embeddings, gps):
+    preds = cls_logits.argmax(dim=1)
+    correct = (preds == labels).sum().item()
+
+    dist_emb = torch.cdist(embeddings, embeddings, p=2)
+    dist_emb.fill_diagonal_(float("inf"))
+    nn_idx = dist_emb.argmin(dim=1)
+    gps_nn = gps[nn_idx]
+    gps_nn_sum = torch.norm(gps - gps_nn, dim=1).sum().item()
+
+    return {
+        "correct": correct,
+        "gps_nn_sum": gps_nn_sum,
+    }
+
+
 @torch.no_grad()
 def evaluate(model, dataloader, criterion_cls, criterion_triplet, lambda_weight, device, amp=False):
     model.eval()
     total = 0.0
     total_cls = 0.0
     total_trip = 0.0
+    total_correct = 0
+    total_gps_nn = 0.0
     n = 0
 
     for images, labels, gps in dataloader:
@@ -77,13 +95,22 @@ def evaluate(model, dataloader, criterion_cls, criterion_triplet, lambda_weight,
             loss_trip = criterion_triplet(emb_out, gps)
             loss = loss_cls + lambda_weight * loss_trip
 
+        metrics = compute_batch_metrics(cls_out, labels, emb_out, gps)
+        total_correct += metrics["correct"]
+        total_gps_nn += metrics["gps_nn_sum"]
+
         bs = images.size(0)
         total += loss.item() * bs
         total_cls += loss_cls.item() * bs
         total_trip += loss_trip.item() * bs
         n += bs
 
-    return total / max(n, 1), total_cls / max(n, 1), total_trip / max(n, 1)
+    avg_loss = total / max(n, 1)
+    avg_cls = total_cls / max(n, 1)
+    avg_trip = total_trip / max(n, 1)
+    avg_acc = total_correct / max(n, 1)
+    avg_gps_nn = total_gps_nn / max(n, 1)
+    return avg_loss, avg_cls, avg_trip, avg_acc, avg_gps_nn
 
 
 def train_model(
@@ -118,15 +145,17 @@ def train_model(
 
     scaler = torch.cuda.amp.GradScaler(enabled=(amp and device.type == "cuda"))
 
-    for epoch in range(1, epochs + 1):
+    epoch_bar = tqdm(range(1, epochs + 1), desc="Epochs", leave=True)
+    for epoch in epoch_bar:
         model.train()
         running = 0.0
         running_cls = 0.0
         running_trip = 0.0
+        running_correct = 0
+        running_gps_nn = 0.0
         seen = 0
 
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}", leave=True)
-        for images, labels, gps in pbar:
+        for images, labels, gps in train_loader:
             images = images.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             gps = gps.to(device, non_blocking=True)
@@ -139,6 +168,10 @@ def train_model(
                 loss_trip = criterion_triplet(emb_out, gps)
                 loss = loss_cls + lambda_weight * loss_trip
 
+            metrics = compute_batch_metrics(cls_out, labels, emb_out, gps)
+            running_correct += metrics["correct"]
+            running_gps_nn += metrics["gps_nn_sum"]
+
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
@@ -149,20 +182,38 @@ def train_model(
             running_trip += loss_trip.item() * bs
             seen += bs
 
-            pbar.set_postfix({
-                "loss": running / max(seen, 1),
-                "cls": running_cls / max(seen, 1),
-                "trip": running_trip / max(seen, 1),
-                "lr": scheduler.get_last_lr()[0],
-            })
-
         scheduler.step()
 
+        train_loss = running / max(seen, 1)
+        train_cls = running_cls / max(seen, 1)
+        train_trip = running_trip / max(seen, 1)
+        train_acc = running_correct / max(seen, 1)
+        train_gps_nn = running_gps_nn / max(seen, 1)
+
         if val_loader is not None:
-            val_loss, val_cls, val_trip = evaluate(
+            val_loss, val_cls, val_trip, val_acc, val_gps_nn = evaluate(
                 model, val_loader, criterion_cls, criterion_triplet, lambda_weight, device, amp=amp
             )
-            print(f"[VAL] loss={val_loss:.4f} cls={val_cls:.4f} trip={val_trip:.4f}")
+            epoch_bar.set_postfix({
+                "loss": train_loss,
+                "cls": train_cls,
+                "trip": train_trip,
+                "acc": train_acc,
+                "nn_gps_m": train_gps_nn,
+                "val_loss": val_loss,
+                "val_acc": val_acc,
+                "val_nn_gps_m": val_gps_nn,
+                "lr": scheduler.get_last_lr()[0],
+            })
+        else:
+            epoch_bar.set_postfix({
+                "loss": train_loss,
+                "cls": train_cls,
+                "trip": train_trip,
+                "acc": train_acc,
+                "nn_gps_m": train_gps_nn,
+                "lr": scheduler.get_last_lr()[0],
+            })
 
     return model
 
@@ -182,6 +233,12 @@ def main():
     seed_everything(SEED)
 
     df = pd.read_csv(CSV_PATH)
+    if not {"image_id", "sector_label", "lat", "lon"}.issubset(df.columns):
+        missing = sorted({"image_id", "sector_label", "lat", "lon"} - set(df.columns))
+        raise KeyError(f"metadata.csv missing required columns: {missing}")
+
+    # Ensure labels are 0..(num_classes-1) for CrossEntropyLoss
+    df["sector_label"] = pd.factorize(df["sector_label"])[0].astype(int)
     num_sectors = int(df["sector_label"].nunique())
     model = MultiTaskResNet(num_sectors=num_sectors)
 
@@ -207,3 +264,7 @@ def main():
 
     torch.save(model.state_dict(), SAVE_PATH)
     print(f"Saved: {SAVE_PATH}")
+
+
+if __name__ == "__main__":
+    main()

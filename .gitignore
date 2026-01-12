@@ -1,5 +1,5 @@
 .vscode
-# data/images
+data/
 .DS_Store
 *.pyc
 checkpoints/

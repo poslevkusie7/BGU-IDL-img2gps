@@ -107,11 +107,15 @@ def get_transforms(mode='train', img_size=224):
         ])
 
 # --- 3. The Helper Function to Create Loaders ---
-def get_dataloader(df, img_dir, batch_size=32, mode='train'):
-    """
-    Creates the DataLoader with the correct transforms and settings.
-    """
+def get_dataloader(df, img_dir, batch_size=32, mode='train', num_workers=4, pin_memory=True):
     transform = get_transforms(mode=mode)
     dataset = LocalizationDataset(df, img_dir, transform=transform)
     should_shuffle = (mode == 'train')
-    return DataLoader(dataset, batch_size=batch_size, shuffle=should_shuffle, num_workers=4, pin_memory=True, drop_last=(mode == 'train'))
+
+    kwargs = dict(batch_size=batch_size, shuffle=should_shuffle, num_workers=num_workers, pin_memory=pin_memory, drop_last=(mode == 'train'))
+
+    # Only valid when num_workers > 0
+    if num_workers > 0:
+        kwargs.update(dict(persistent_workers=True, prefetch_factor=4))
+
+    return DataLoader(dataset, **kwargs)

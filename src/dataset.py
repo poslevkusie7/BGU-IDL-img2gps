@@ -1,6 +1,7 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
+from torchvision import transforms
 import pandas as pd
 import os
 import utm  
@@ -63,42 +64,54 @@ class LocalizationDataset(Dataset):
         """Helper to recover original coordinates if needed"""
         return self.mean_easting, self.mean_northing
     
-from torchvision import transforms
-
+# --- 2. Augmentation / Transform Logic ---
 def get_transforms(mode='train', img_size=224):
-    # Standard ImageNet normalization (Required for pre-trained ResNet)
+    """
+    Returns the correct transformation pipeline based on the mode.
+    Input images are 512x512, Model expects 224x224.
+    """
+    # Standard ImageNet normalization
     mean = [0.485, 0.456, 0.406]
     std  = [0.229, 0.224, 0.225]
 
     if mode == 'train':
         return transforms.Compose([
-            # 1. Geometric Augmentations (Position/Scale)
-            # Randomly resize and crop to simulate different distances/zooms
-            transforms.RandomResizedCrop(img_size, scale=(0.8, 1.0), ratio=(0.9, 1.1)),
+            # 1. Geometric: Random Crop & Resize
+            # Takes a random piece of the 512 image and resizes it to 224
+            transforms.RandomResizedCrop(img_size, scale=(0.8, 1.0), ratio=(0.9, 1.1)), # the only under big question, but should be good
             
-            # 2. Photometric Augmentations (Lighting/Weather)
-            # Simulates different times of day, shadows, and camera exposure
-            transforms.ColorJitter(
-                brightness=0.2, 
-                contrast=0.2, 
-                saturation=0.2, 
-                hue=0.05
-            ),
+            # 2. Geometric: Horizontal Flip (Caution: flips left/right orientation) $ how will gps react ?
+            transforms.RandomHorizontalFlip(p=0.5),
             
-            # 3. Regularization
-            # Occasionally turns image grayscale (helps focus on structure, not just color)
+            # 3. Photometric: Color Jitter
+            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.05),
+            
+            # 4. Regularization: Grayscale
             transforms.RandomGrayscale(p=0.1),
             
-            # Final formatting
+            # 5. Regularization: Blur
+            transforms.GaussianBlur(kernel_size=(5, 5), sigma=(0.1, 5)),
+            
+            # 6. Formatting
             transforms.ToTensor(),
             transforms.Normalize(mean=mean, std=std)
         ])
         
     else: # 'val' or 'test'
         return transforms.Compose([
-            # Deterministic resize
-            transforms.Resize(256),
-            transforms.CenterCrop(img_size),
+            # Squashes 512x512 -> 224x224 (No cropping) maybe but why?
+            transforms.Resize((img_size, img_size)), 
+            
             transforms.ToTensor(),
             transforms.Normalize(mean=mean, std=std)
         ])
+
+# --- 3. The Helper Function to Create Loaders ---
+def get_dataloader(df, img_dir, batch_size=32, mode='train'):
+    """
+    Creates the DataLoader with the correct transforms and settings.
+    """
+    transform = get_transforms(mode=mode)
+    dataset = LocalizationDataset(df, img_dir, transform=transform)
+    should_shuffle = (mode == 'train')
+    return DataLoader(dataset, batch_size=batch_size, shuffle=should_shuffle, num_workers=4, pin_memory=True, drop_last=(mode == 'train'))

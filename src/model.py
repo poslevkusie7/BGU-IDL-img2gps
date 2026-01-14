@@ -14,41 +14,37 @@ class GeM(nn.Module):
         x = F.avg_pool2d(x, (x.size(-2), x.size(-1)))
         return x.pow(1.0 / self.p)
 
-class MDNResNet(nn.Module):
-    """
-    Outputs a mixture of K diagonal Gaussians in 2D:
-      pi_logits: [B,K]
-      mu:       [B,K,2]
-      log_sigma:[B,K,2]
-    """
-    def __init__(self, K=5, hidden=1024):
+class EmbedNet(nn.Module):
+    def __init__(self, emb_dim=512):
         super().__init__()
         resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
         self.backbone = nn.Sequential(*list(resnet.children())[:-2])
         self.pool = GeM(p=3.0)
-
-        self.trunk = nn.Sequential(
+        self.head = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(2048, hidden),
+            nn.Linear(2048, 1024),
             nn.ReLU(),
             nn.Dropout(0.2),
+            nn.Linear(1024, emb_dim),
+            nn.BatchNorm1d(emb_dim),
         )
-
-        self.pi = nn.Linear(hidden, K)
-        self.mu = nn.Linear(hidden, K * 2)
-        self.log_sigma = nn.Linear(hidden, K * 2)
-
-        self.K = K
 
     def forward(self, x):
         f = self.backbone(x)
         p = self.pool(f)
-        h = self.trunk(p)
+        e = self.head(p)
+        return F.normalize(e, p=2, dim=1)
 
-        pi_logits = self.pi(h)                         # [B,K]
-        mu = self.mu(h).view(-1, self.K, 2)            # [B,K,2]
-        log_sigma = self.log_sigma(h).view(-1, self.K, 2)  # [B,K,2]
-        # stabilize sigma
-        log_sigma = torch.clamp(log_sigma, -7.0, 7.0)
+class RefineHead(nn.Module):
+    def __init__(self, emb_dim=512):
+        super().__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(emb_dim + 2, 256),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(256, 2)
+        )
 
-        return pi_logits, mu, log_sigma
+    def forward(self, emb, xy0):
+        x = torch.cat([emb, xy0], dim=1)
+        return self.mlp(x)

@@ -219,7 +219,7 @@ def train_model(
 
 
 def main():
-    CSV_PATH = "data/metadata.csv"
+    CSV_PATH = "data/metadata1.csv"
     IMG_DIR  = "data/images"
     BATCH_SIZE = 32
     EPOCHS = 20

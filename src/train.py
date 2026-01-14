@@ -7,9 +7,8 @@ import torch.optim as optim
 from tqdm import tqdm
 import pandas as pd
 
-# Use package-relative imports for python -m src.train
-from src.dataset import get_dataloader
-from src.model import MultiTaskResNet
+from dataset import get_dataloader
+from model import MultiTaskResNet
 
 class GPSTripletLoss(nn.Module):
     def __init__(self, margin=0.3, pos_thresh=15.0, neg_thresh=50.0):
@@ -73,7 +72,7 @@ def evaluate(model, dataloader, criterion_cls, criterion_triplet, lambda_weight,
         n += bs
     return total/n, total_cls/n, total_trip/n, total_correct/n, total_gps_nn/n
 
-def train_model(model, train_loader, val_loader, epochs=20, device="cuda", lr=1e-4, lambda_weight=1.0, amp=True):
+def train_model(model, train_loader, val_loader, epochs=20, device="cuda", lr=1e-2, lambda_weight=0.0, amp=True):
     device = torch.device(device if torch.cuda.is_available() else "cpu")
     model.to(device)
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
@@ -96,11 +95,10 @@ def train_model(model, train_loader, val_loader, epochs=20, device="cuda", lr=1e
             
             with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=amp):
                 cls_out, emb_out = model(images)
+
             l_cls = criterion_cls(cls_out, labels)
             l_trip = criterion_triplet(emb_out, gps)
             loss = l_cls + (lambda_weight * l_trip)
-                cls_out, emb_out = model(images)
-                loss = criterion_cls(cls_out, labels) + lambda_weight * criterion_triplet(emb_out, gps)
             
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -130,17 +128,8 @@ def train_model(model, train_loader, val_loader, epochs=20, device="cuda", lr=1e
 
 def main():
     CSV_PATH = "data/metadata1.csv"
-    IMG_DIR  = "data/images"
-    BATCH_SIZE = 32
-    EPOCHS = 20
-    NUM_WORKERS = 4
-    DEVICE = "cuda"
-    AMP = True
-    COMPILE = False
-    SAVE_PATH = "model.pt"
-    SEED = 42
 
-    seed_everything(SEED)
+    seed_everything()
 
     df = pd.read_csv(CSV_PATH)
     if not {"image_id", "sector_label", "lat", "lon"}.issubset(df.columns):

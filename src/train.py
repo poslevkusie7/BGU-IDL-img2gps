@@ -143,7 +143,7 @@ def train_model(
     criterion_cls = nn.CrossEntropyLoss()
     criterion_triplet = GPSTripletLoss(margin=0.3, pos_thresh=15, neg_thresh=50)
 
-    scaler = torch.cuda.amp.GradScaler(enabled=(amp and device.type == "cuda"))
+    scaler = torch.amp.GradScaler('cuda', enabled=(amp and device.type == "cuda"))
 
     epoch_bar = tqdm(range(1, epochs + 1), desc="Epochs", leave=True)
     for epoch in epoch_bar:
@@ -195,21 +195,14 @@ def train_model(
                 model, val_loader, criterion_cls, criterion_triplet, lambda_weight, device, amp=amp
             )
             epoch_bar.set_postfix({
-                "loss": train_loss,
-                "cls": train_cls,
-                "trip": train_trip,
                 "acc": train_acc,
                 "nn_gps_m": train_gps_nn,
-                "val_loss": val_loss,
                 "val_acc": val_acc,
                 "val_nn_gps_m": val_gps_nn,
                 "lr": scheduler.get_last_lr()[0],
             })
         else:
             epoch_bar.set_postfix({
-                "loss": train_loss,
-                "cls": train_cls,
-                "trip": train_trip,
                 "acc": train_acc,
                 "nn_gps_m": train_gps_nn,
                 "lr": scheduler.get_last_lr()[0],
@@ -222,7 +215,7 @@ def main():
     CSV_PATH = "data/metadata.csv"
     IMG_DIR  = "data/images"
     BATCH_SIZE = 32
-    EPOCHS = 20
+    EPOCHS = 150
     NUM_WORKERS = 4
     DEVICE = "cuda"
     AMP = True
@@ -251,6 +244,9 @@ def main():
     val_loader = get_dataloader(
         val_df, IMG_DIR, batch_size=BATCH_SIZE, mode="val", num_workers=NUM_WORKERS
     )
+    
+    print(f"train samples: {len(train_loader.dataset)} | train batches: {len(train_loader)}")
+    print(f"val   samples: {len(val_loader.dataset)} | val   batches: {len(val_loader)}")
 
     model = train_model(
         model,

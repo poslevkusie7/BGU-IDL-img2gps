@@ -3,4 +3,4 @@ data/images/
 .DS_Store
 *.pyc
 checkpoints/
-
+*.html

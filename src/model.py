@@ -10,51 +10,45 @@ except ImportError:
 
 # 1. The GeM Layer Definition
 class GeM(nn.Module):
-    def __init__(self, p=3, eps=1e-6):
-        super(GeM, self).__init__()
-        # p is a learnable parameter, initialized to 3
+    def __init__(self, p=3.0, eps=1e-6):
+        super().__init__()
         self.p = nn.Parameter(torch.ones(1) * p)
         self.eps = eps
 
     def forward(self, x):
-        return F.avg_pool2d(x.clamp(min=self.eps).pow(self.p), (x.size(-2), x.size(-1))).pow(1./self.p)
+        x = x.clamp(min=self.eps).pow(self.p)
+        x = F.avg_pool2d(x, (x.size(-2), x.size(-1)))
+        return x.pow(1.0 / self.p)
 
-# 2. The Main Model
-class MultiTaskResNet(nn.Module):
-    def __init__(self, num_sectors=5):
-        super(MultiTaskResNet, self).__init__()
-        
-        # --- BACKBONE ---
-        weights = models.ResNet50_Weights.DEFAULT
-        resnet = models.resnet50(weights=weights)
-        
-        # We keep the convolutional layers (children[:-2]) 
-        # dropping the original 'avgpool' and 'fc' layers.
-        self.features = nn.Sequential(*list(resnet.children())[:-2])
-        
-        # Add our custom GeM pooling
-        self.gem_pool = GeM(p=3)
-        
-        # Feature dimension for ResNet50 is 2048
-        self.feature_dim = 2048
-        
-        # --- HEAD 1: SECTOR CLASSIFICATION ---
-        self.cls_head = nn.Sequential(
+class EmbedNet(nn.Module):
+    def __init__(self, emb_dim=512):
+        super().__init__()
+        resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
+        self.backbone = nn.Sequential(*list(resnet.children())[:-2])
+        self.pool = GeM(p=3.0)
+        self.head = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(self.feature_dim, 512),
+            nn.Linear(2048, 1024),
             nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(512, num_sectors)
+            nn.Dropout(0.2),
+            nn.Linear(1024, emb_dim),
+            nn.BatchNorm1d(emb_dim),
         )
-        
-        # --- HEAD 2: METRIC EMBEDDING ---
-        self.emb_head = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(self.feature_dim, 512),
-            nn.BatchNorm1d(512),
+
+    def forward(self, x):
+        f = self.backbone(x)
+        p = self.pool(f)
+        e = self.head(p)
+        return F.normalize(e, p=2, dim=1)
+
+class RefineHead(nn.Module):
+    def __init__(self, emb_dim=512):
+        super().__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(emb_dim + 2, 256),
             nn.ReLU(),
-            nn.Linear(512, 512)
-            # L2 Norm is applied in forward()
+            nn.Dropout(0.1),
+            nn.Linear(256, 2)
         )
 
     def forward(self, x):

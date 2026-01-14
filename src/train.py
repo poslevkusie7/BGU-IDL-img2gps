@@ -1,55 +1,12 @@
-import argparse
-import os
-import random
-
+import os, random, argparse
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 import pandas as pd
 
-from .dataset import get_dataloader
-from .model import MultiTaskResNet
-
-
-class GPSTripletLoss(nn.Module):
-    """
-    Triplet-style loss based on GPS distance.
-    Vectorized hardest-pos / hardest-neg mining (much faster than Python loop).
-    """
-    def __init__(self, margin=0.3, pos_thresh=15.0, neg_thresh=50.0):
-        super().__init__()
-        self.margin = margin
-        self.pos_thresh = pos_thresh
-        self.neg_thresh = neg_thresh
-
-    def forward(self, embeddings, gps_coords):
-        # Pairwise distances
-        dist_emb = torch.cdist(embeddings, embeddings, p=2)   # [B,B]
-        dist_gps = torch.cdist(gps_coords, gps_coords, p=2)   # [B,B]
-
-        # Masks
-        mask_pos = (dist_gps < self.pos_thresh) & (dist_gps > 0)
-        mask_neg = (dist_gps > self.neg_thresh)
-
-        has_pos = mask_pos.any(dim=1)
-        has_neg = mask_neg.any(dim=1)
-        valid = has_pos & has_neg
-
-        if not valid.any():
-            return torch.zeros((), device=embeddings.device)
-
-        # hardest positive: max dist among positives
-        pos_d = dist_emb.masked_fill(~mask_pos, float("-inf")).max(dim=1).values
-        # hardest negative: min dist among negatives
-        neg_d = dist_emb.masked_fill(~mask_neg, float("inf")).min(dim=1).values
-
-        pos_d = pos_d[valid]
-        neg_d = neg_d[valid]
-
-        loss = torch.relu(pos_d.pow(2) - neg_d.pow(2) + self.margin)
-        return loss.mean()
-
+from src.dataset import get_dataloader
+from src.model import EmbedNet, RefineHead
 
 def seed_everything(seed=42):
     random.seed(seed)
@@ -57,214 +14,234 @@ def seed_everything(seed=42):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
+class GPSTripletLoss(nn.Module):
+    def __init__(self, margin=0.3, pos_thresh=30.0, neg_thresh=80.0):
+        super().__init__()
+        self.margin = margin
+        self.pos_thresh = pos_thresh
+        self.neg_thresh = neg_thresh
 
-def compute_batch_metrics(cls_logits, labels, embeddings, gps):
-    preds = cls_logits.argmax(dim=1)
-    correct = (preds == labels).sum().item()
+    def forward(self, embeddings, gps_coords):
+        dist_emb = torch.cdist(embeddings, embeddings, p=2)
+        dist_gps = torch.cdist(gps_coords, gps_coords, p=2)
 
-    dist_emb = torch.cdist(embeddings, embeddings, p=2)
-    dist_emb.fill_diagonal_(float("inf"))
-    nn_idx = dist_emb.argmin(dim=1)
-    gps_nn = gps[nn_idx]
-    gps_nn_sum = torch.norm(gps - gps_nn, dim=1).sum().item()
+        mask_pos = (dist_gps < self.pos_thresh) & (dist_gps > 0)
+        mask_neg = (dist_gps > self.neg_thresh)
 
-    return {
-        "correct": correct,
-        "gps_nn_sum": gps_nn_sum,
-    }
+        valid = mask_pos.any(dim=1) & mask_neg.any(dim=1)
+        if not valid.any():
+            return torch.zeros((), device=embeddings.device)
 
+        pos_d = dist_emb.masked_fill(~mask_pos, float("-inf")).max(dim=1).values
+        neg_d = dist_emb.masked_fill(~mask_neg, float("inf")).min(dim=1).values
+
+        loss = torch.relu(pos_d[valid].pow(2) - neg_d[valid].pow(2) + self.margin)
+        return loss.mean()
 
 @torch.no_grad()
-def evaluate(model, dataloader, criterion_cls, criterion_triplet, lambda_weight, device, amp=False):
-    model.eval()
-    total = 0.0
-    total_cls = 0.0
-    total_trip = 0.0
-    total_correct = 0
-    total_gps_nn = 0.0
-    n = 0
+def build_db(embed_model, loader, device, amp=False):
+    embed_model.eval()
+    E_list, XY_list = [], []
+    for images, _labels, gps in tqdm(loader, desc="Building DB", leave=False):
+        images = images.to(device)
+        gps = gps.to(device)
+        with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=amp and device.type=="cuda"):
+            e = embed_model(images)
+        E_list.append(e.detach().float().cpu())
+        XY_list.append(gps.detach().float().cpu())
+    E = torch.cat(E_list, dim=0)   # [N,D]
+    XY = torch.cat(XY_list, dim=0) # [N,2]
+    # normalize for dot-product retrieval
+    E = torch.nn.functional.normalize(E, p=2, dim=1)
+    return E, XY
 
-    for images, labels, gps in dataloader:
-        images = images.to(device, non_blocking=True)
-        labels = labels.to(device, non_blocking=True)
-        gps = gps.to(device, non_blocking=True)
+@torch.no_grad()
+def retrieve_xy0(E_query, E_db, XY_db, K=10, tau=0.07, device="cpu", chunk=4096):
+    """
+    Chunked top-K over database to avoid huge memory.
+    E_query: [B,D] (device)
+    E_db: [N,D] (cpu)
+    XY_db: [N,2] (cpu)
+    Returns xy0: [B,2] (device)
+    """
+    B, D = E_query.shape
+    # keep best across chunks
+    best_vals = torch.full((B, K), -1e9, device=device)
+    best_idx  = torch.full((B, K), -1, dtype=torch.long, device=device)
 
-        with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(amp and device.type == "cuda")):
-            cls_out, emb_out = model(images)
-            loss_cls = criterion_cls(cls_out, labels)
-            loss_trip = criterion_triplet(emb_out, gps)
-            loss = loss_cls + lambda_weight * loss_trip
+    E_db = E_db.to(device)
+    # chunk over db rows
+    for start in range(0, E_db.size(0), chunk):
+        end = min(start + chunk, E_db.size(0))
+        sims = E_query @ E_db[start:end].T  # [B,chunk]
+        vals, idx = sims.topk(K, dim=1)
+        idx = idx + start
 
-        metrics = compute_batch_metrics(cls_out, labels, emb_out, gps)
-        total_correct += metrics["correct"]
-        total_gps_nn += metrics["gps_nn_sum"]
+        # merge with current best
+        merged_vals = torch.cat([best_vals, vals], dim=1)  # [B,2K]
+        merged_idx  = torch.cat([best_idx,  idx], dim=1)
 
-        bs = images.size(0)
-        total += loss.item() * bs
-        total_cls += loss_cls.item() * bs
-        total_trip += loss_trip.item() * bs
-        n += bs
+        best_vals, pos = merged_vals.topk(K, dim=1)
+        best_idx = torch.gather(merged_idx, 1, pos)
 
-    avg_loss = total / max(n, 1)
-    avg_cls = total_cls / max(n, 1)
-    avg_trip = total_trip / max(n, 1)
-    avg_acc = total_correct / max(n, 1)
-    avg_gps_nn = total_gps_nn / max(n, 1)
-    return avg_loss, avg_cls, avg_trip, avg_acc, avg_gps_nn
+    # gather XY and weight
+    XY_db_dev = XY_db.to(device)
+    nn_xy = XY_db_dev[best_idx]  # [B,K,2]
 
+    w = torch.softmax(best_vals / tau, dim=1)  # [B,K]
+    xy0 = (w.unsqueeze(-1) * nn_xy).sum(dim=1) # [B,2]
+    return xy0
 
-def train_model(
-    model,
-    train_loader,
-    val_loader=None,
-    epochs=20,
-    device="cuda",
-    lr=1e-4,
-    weight_decay=1e-4,
-    lambda_weight=1.0,
-    amp=True,
-    compile_model=False,
-):
-    device = torch.device(device if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
+@torch.no_grad()
+def eval_retrieval(embed_model, loader, E_db, XY_db, device, K=10, tau=0.07, amp=False):
+    embed_model.eval()
+    errs = []
+    for images, _labels, gps in tqdm(loader, desc="Eval retrieval", leave=False):
+        images = images.to(device)
+        gps = gps.to(device)
+        with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=amp and device.type=="cuda"):
+            e = embed_model(images)
+        e = torch.nn.functional.normalize(e, p=2, dim=1)
+        xy0 = retrieve_xy0(e, E_db, XY_db, K=K, tau=tau, device=device)
+        err = torch.norm(xy0 - gps, dim=1)
+        errs.append(err.detach().cpu())
+    errs = torch.cat(errs)
+    return float(errs.mean()), float(errs.median())
 
-    # Speed knobs (GPU)
-    if device.type == "cuda":
-        torch.backends.cudnn.benchmark = True
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.set_float32_matmul_precision("high")
-
-    if compile_model and hasattr(torch, "compile"):
-        model = torch.compile(model)
-
-    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
-
-    criterion_cls = nn.CrossEntropyLoss()
-    criterion_triplet = GPSTripletLoss(margin=0.3, pos_thresh=15, neg_thresh=50)
-
-    scaler = torch.cuda.amp.GradScaler(enabled=(amp and device.type == "cuda"))
-
-    epoch_bar = tqdm(range(1, epochs + 1), desc="Epochs", leave=True)
-    for epoch in epoch_bar:
-        model.train()
-        running = 0.0
-        running_cls = 0.0
-        running_trip = 0.0
-        running_correct = 0
-        running_gps_nn = 0.0
-        seen = 0
-
-        for images, labels, gps in train_loader:
-            images = images.to(device, non_blocking=True)
-            labels = labels.to(device, non_blocking=True)
-            gps = gps.to(device, non_blocking=True)
-
-            optimizer.zero_grad(set_to_none=True)
-
-            with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(amp and device.type == "cuda")):
-                cls_out, emb_out = model(images)
-                loss_cls = criterion_cls(cls_out, labels)
-                loss_trip = criterion_triplet(emb_out, gps)
-                loss = loss_cls + lambda_weight * loss_trip
-
-            metrics = compute_batch_metrics(cls_out, labels, emb_out, gps)
-            running_correct += metrics["correct"]
-            running_gps_nn += metrics["gps_nn_sum"]
-
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-
-            bs = images.size(0)
-            running += loss.item() * bs
-            running_cls += loss_cls.item() * bs
-            running_trip += loss_trip.item() * bs
-            seen += bs
-
-        scheduler.step()
-
-        train_loss = running / max(seen, 1)
-        train_cls = running_cls / max(seen, 1)
-        train_trip = running_trip / max(seen, 1)
-        train_acc = running_correct / max(seen, 1)
-        train_gps_nn = running_gps_nn / max(seen, 1)
-
-        if val_loader is not None:
-            val_loss, val_cls, val_trip, val_acc, val_gps_nn = evaluate(
-                model, val_loader, criterion_cls, criterion_triplet, lambda_weight, device, amp=amp
-            )
-            epoch_bar.set_postfix({
-                "loss": train_loss,
-                "cls": train_cls,
-                "trip": train_trip,
-                "acc": train_acc,
-                "nn_gps_m": train_gps_nn,
-                "val_loss": val_loss,
-                "val_acc": val_acc,
-                "val_nn_gps_m": val_gps_nn,
-                "lr": scheduler.get_last_lr()[0],
-            })
-        else:
-            epoch_bar.set_postfix({
-                "loss": train_loss,
-                "cls": train_cls,
-                "trip": train_trip,
-                "acc": train_acc,
-                "nn_gps_m": train_gps_nn,
-                "lr": scheduler.get_last_lr()[0],
-            })
-
-    return model
-
+@torch.no_grad()
+def eval_refined(embed_model, refine_head, loader, E_db, XY_db, device, K=10, tau=0.07, amp=False):
+    embed_model.eval()
+    refine_head.eval()
+    errs = []
+    for images, _labels, gps in tqdm(loader, desc="Eval refined", leave=False):
+        images = images.to(device)
+        gps = gps.to(device)
+        with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=amp and device.type=="cuda"):
+            e = embed_model(images)
+        e = torch.nn.functional.normalize(e, p=2, dim=1)
+        xy0 = retrieve_xy0(e, E_db, XY_db, K=K, tau=tau, device=device)
+        delta = refine_head(e.float(), xy0.float())
+        pred = xy0 + delta
+        err = torch.norm(pred - gps, dim=1)
+        errs.append(err.detach().cpu())
+    errs = torch.cat(errs)
+    return float(errs.mean()), float(errs.median())
 
 def main():
-    CSV_PATH = "data/metadata1.csv"
-    IMG_DIR  = "data/images"
-    BATCH_SIZE = 32
-    EPOCHS = 20
-    NUM_WORKERS = 4
-    DEVICE = "cuda"
-    AMP = True
-    COMPILE = False
-    SAVE_PATH = "model.pt"
-    SEED = 42
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--csv", default="data/metadata1.csv")
+    ap.add_argument("--img_dir", default="data/images")
+    ap.add_argument("--batch_size", type=int, default=32)
+    ap.add_argument("--epochs_embed", type=int, default=10)
+    ap.add_argument("--epochs_refine", type=int, default=10)
+    ap.add_argument("--emb_dim", type=int, default=512)
+    ap.add_argument("--lr_embed", type=float, default=1e-4)
+    ap.add_argument("--lr_refine", type=float, default=3e-4)
+    ap.add_argument("--K", type=int, default=10)
+    ap.add_argument("--tau", type=float, default=0.07)
+    ap.add_argument("--pos", type=float, default=30.0)
+    ap.add_argument("--neg", type=float, default=80.0)
+    ap.add_argument("--amp", action="store_true")
+    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--save_embed", default="embed.pt")
+    ap.add_argument("--save_refine", default="refine.pt")
+    args = ap.parse_args()
 
-    seed_everything(SEED)
+    seed_everything(args.seed)
 
-    df = pd.read_csv(CSV_PATH)
-    if not {"image_id", "sector_label", "lat", "lon"}.issubset(df.columns):
-        missing = sorted({"image_id", "sector_label", "lat", "lon"} - set(df.columns))
-        raise KeyError(f"metadata.csv missing required columns: {missing}")
-
-    # Ensure labels are 0..(num_classes-1) for CrossEntropyLoss
+    df = pd.read_csv(args.csv)
     df["sector_label"] = pd.factorize(df["sector_label"])[0].astype(int)
-    num_sectors = int(df["sector_label"].nunique())
-    model = MultiTaskResNet(num_sectors=num_sectors)
 
-    train_df = df.sample(frac=0.9, random_state=SEED)
+    train_df = df.sample(frac=0.9, random_state=args.seed)
     val_df = df.drop(train_df.index)
 
-    train_loader = get_dataloader(
-        train_df, IMG_DIR, batch_size=BATCH_SIZE, mode="train", num_workers=NUM_WORKERS
-    )
-    val_loader = get_dataloader(
-        val_df, IMG_DIR, batch_size=BATCH_SIZE, mode="val", num_workers=NUM_WORKERS
-    )
+    # IMPORTANT:
+    # For retrieval DB building, you want *no heavy augmentation*.
+    # So we use mode="val" for the DB loader too.
+    train_loader_aug, train_ds = get_dataloader(train_df, args.img_dir, batch_size=64, mode="train")
+    origin = train_ds.get_reference_origin()
 
-    model = train_model(
-        model,
-        train_loader,
-        val_loader=val_loader,
-        epochs=EPOCHS,
-        device=DEVICE,
-        amp=AMP,
-        compile_model=COMPILE,
-    )
+    train_loader_db, _ = get_dataloader(train_df, args.img_dir, batch_size=64, mode="db", reference_origin=origin)
+    val_loader, _      = get_dataloader(val_df,   args.img_dir, batch_size=64, mode="val", reference_origin=origin)
+    
+    _, _, gps_tr = next(iter(train_loader_aug))
+    _, _, gps_va = next(iter(val_loader))
+    print("train gps mean:", gps_tr.mean(0), "val gps mean:", gps_va.mean(0))
 
-    torch.save(model.state_dict(), SAVE_PATH)
-    print(f"Saved: {SAVE_PATH}")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    embed_model = EmbedNet(emb_dim=args.emb_dim).to(device)
+    triplet = GPSTripletLoss(pos_thresh=args.pos, neg_thresh=args.neg).to(device)
+    opt = optim.AdamW(embed_model.parameters(), lr=args.lr_embed, weight_decay=1e-4)
+    scaler = torch.cuda.amp.GradScaler(enabled=args.amp and device.type=="cuda")
+
+    # ---- Phase A: train embedding ----
+    for ep in range(1, args.epochs_embed + 1):
+        embed_model.train()
+        pbar = tqdm(train_loader_aug, desc=f"Embed Epoch {ep}/{args.epochs_embed}")
+        for images, _labels, gps in pbar:
+            images = images.to(device)
+            gps = gps.to(device)
+
+            opt.zero_grad(set_to_none=True)
+            with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=args.amp and device.type=="cuda"):
+                e = embed_model(images)
+                loss = triplet(e, gps)
+
+            scaler.scale(loss).backward()
+            scaler.step(opt)
+            scaler.update()
+
+            pbar.set_postfix(triplet=float(loss))
+
+        # build DB + eval retrieval each epoch
+        E_db, XY_db = build_db(embed_model, train_loader_db, device, amp=args.amp)
+        mean_e, med_e = eval_retrieval(embed_model, val_loader, E_db, XY_db, device, K=args.K, tau=args.tau, amp=args.amp)
+        print(f"[Embed Epoch {ep}] Retrieval MeanErr(m): {mean_e:.2f} | MedErr(m): {med_e:.2f}")
+
+    torch.save(embed_model.state_dict(), args.save_embed)
+    print(f"Saved embedding model: {args.save_embed}")
+
+    # ---- Phase B: train refinement head (freeze embedding) ----
+    for p in embed_model.parameters():
+        p.requires_grad = False
+    embed_model.eval()
+
+    refine = RefineHead(emb_dim=args.emb_dim).to(device)
+    opt_r = optim.AdamW(refine.parameters(), lr=args.lr_refine, weight_decay=1e-4)
+    crit = nn.SmoothL1Loss()
+
+    # Build fixed DB once
+    E_db, XY_db = build_db(embed_model, train_loader_db, device, amp=args.amp)
+
+    for ep in range(1, args.epochs_refine + 1):
+        refine.train()
+        pbar = tqdm(train_loader_db, desc=f"Refine Epoch {ep}/{args.epochs_refine}")
+        for images, _labels, gps in pbar:
+            images = images.to(device)
+            gps = gps.to(device)
+
+            with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=args.amp and device.type=="cuda"):
+                e = embed_model(images)
+            e = torch.nn.functional.normalize(e, p=2, dim=1).float()
+
+            xy0 = retrieve_xy0(e, E_db, XY_db, K=args.K, tau=args.tau, device=device)
+            delta = refine(e, xy0)
+            pred = xy0 + delta
+
+            loss = crit(pred, gps.float())
+
+            opt_r.zero_grad(set_to_none=True)
+            loss.backward()
+            opt_r.step()
+
+            pbar.set_postfix(refine=float(loss))
+
+        mean_r, med_r = eval_refined(embed_model, refine, val_loader, E_db, XY_db, device, K=args.K, tau=args.tau, amp=args.amp)
+        print(f"[Refine Epoch {ep}] Refined MeanErr(m): {mean_r:.2f} | MedErr(m): {med_r:.2f}")
+
+    torch.save(refine.state_dict(), args.save_refine)
+    print(f"Saved refine head: {args.save_refine}")
 
 if __name__ == "__main__":
     main()

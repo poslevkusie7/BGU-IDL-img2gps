@@ -83,7 +83,7 @@ class DinoV2CoordRegressor(nn.Module):
             model_name,
             pretrained=pretrained,
             num_classes=0,
-            global_pool="avg",
+            global_pool="token",
         )
         feat_dim = getattr(self.backbone, "num_features", 768)
         self.regressor = nn.Sequential(

@@ -77,7 +77,7 @@ class Lookahead(optim.Optimizer):
 
 def build_transforms(
     mode="train",
-    img_size=224,
+    img_size=518,
     randaugment=False,
     ra_n=2,
     ra_m=9,

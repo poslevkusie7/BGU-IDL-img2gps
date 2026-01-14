@@ -3,6 +3,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
 
+try:
+    import timm
+except ImportError:
+    timm = None
+
 # 1. The GeM Layer Definition
 class GeM(nn.Module):
     def __init__(self, p=3, eps=1e-6):
@@ -68,3 +73,69 @@ class MultiTaskResNet(nn.Module):
         embedding = F.normalize(emb_feat, p=2, dim=1)
         
         return cls_logits, embedding
+
+
+class DinoV2CoordRegressor(nn.Module):
+    def __init__(
+        self,
+        pretrained=True,
+        model_name="vit_base_patch14_dinov2.lvd142m",
+        drop_rate=0.1,
+    ):
+        super().__init__()
+        if timm is None:
+            raise ImportError("timm is required for DINOv2 models. Install timm or use a different backbone.")
+        self.backbone = timm.create_model(
+            model_name,
+            pretrained=pretrained,
+            num_classes=0,
+            global_pool="avg",
+        )
+        feat_dim = getattr(self.backbone, "num_features", 768)
+        self.regressor = nn.Sequential(
+            nn.LayerNorm(feat_dim),
+            nn.Dropout(drop_rate),
+            nn.Linear(feat_dim, 256),
+            nn.ReLU(),
+            nn.Dropout(drop_rate),
+            nn.Linear(256, 2),
+        )
+
+    def forward(self, x):
+        feats = self.backbone(x)
+        if isinstance(feats, (tuple, list)):
+            feats = feats[0]
+        coords = self.regressor(feats)
+        return coords
+
+    def freeze_backbone(self):
+        for p in self.backbone.parameters():
+            p.requires_grad = False
+
+    def unfreeze_backbone(self):
+        for p in self.backbone.parameters():
+            p.requires_grad = True
+
+
+class SwinRegionClassifier(nn.Module):
+    def __init__(self, num_classes=3, pretrained=True, drop_rate=0.1):
+        super().__init__()
+        weights = models.Swin_B_Weights.DEFAULT if pretrained else None
+        self.backbone = models.swin_base_patch4_window7_224(weights=weights)
+        in_features = self.backbone.head.in_features
+        self.backbone.head = nn.Sequential(
+            nn.Dropout(drop_rate),
+            nn.Linear(in_features, num_classes),
+        )
+
+    def forward(self, x):
+        return self.backbone(x)
+
+    def freeze_backbone(self):
+        for name, p in self.backbone.named_parameters():
+            if not name.startswith("head."):
+                p.requires_grad = False
+
+    def unfreeze_backbone(self):
+        for p in self.backbone.parameters():
+            p.requires_grad = True

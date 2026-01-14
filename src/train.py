@@ -158,9 +158,15 @@ def main():
     # IMPORTANT:
     # For retrieval DB building, you want *no heavy augmentation*.
     # So we use mode="val" for the DB loader too.
-    train_loader_aug = get_dataloader(train_df, args.img_dir, batch_size=args.batch_size, mode="train")
-    train_loader_db  = get_dataloader(train_df, args.img_dir, batch_size=args.batch_size, mode="val")
-    val_loader       = get_dataloader(val_df,   args.img_dir, batch_size=args.batch_size, mode="val")
+    train_loader_aug, train_ds = get_dataloader(train_df, args.img_dir, batch_size=64, mode="train")
+    origin = train_ds.get_reference_origin()
+
+    train_loader_db, _ = get_dataloader(train_df, args.img_dir, batch_size=64, mode="db", reference_origin=origin)
+    val_loader, _      = get_dataloader(val_df,   args.img_dir, batch_size=64, mode="val", reference_origin=origin)
+    
+    _, _, gps_tr = next(iter(train_loader_aug))
+    _, _, gps_va = next(iter(val_loader))
+    print("train gps mean:", gps_tr.mean(0), "val gps mean:", gps_va.mean(0))
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

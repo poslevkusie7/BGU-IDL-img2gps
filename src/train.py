@@ -129,8 +129,25 @@ def train_model(model, train_loader, val_loader, epochs=20, device="cuda", lr=1e
     return model
 
 def main():
-    seed_everything(42)
-    df = pd.read_csv("data/metadata.csv")
+    CSV_PATH = "data/metadata1.csv"
+    IMG_DIR  = "data/images"
+    BATCH_SIZE = 32
+    EPOCHS = 20
+    NUM_WORKERS = 4
+    DEVICE = "cuda"
+    AMP = True
+    COMPILE = False
+    SAVE_PATH = "model.pt"
+    SEED = 42
+
+    seed_everything(SEED)
+
+    df = pd.read_csv(CSV_PATH)
+    if not {"image_id", "sector_label", "lat", "lon"}.issubset(df.columns):
+        missing = sorted({"image_id", "sector_label", "lat", "lon"} - set(df.columns))
+        raise KeyError(f"metadata.csv missing required columns: {missing}")
+
+    # Ensure labels are 0..(num_classes-1) for CrossEntropyLoss
     df["sector_label"] = pd.factorize(df["sector_label"])[0].astype(int)
     
     train_df = df.sample(frac=0.9, random_state=42)

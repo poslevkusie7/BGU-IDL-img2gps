@@ -65,69 +65,64 @@ class LocalizationDataset(Dataset):
         return self.mean_easting, self.mean_northing
     
 # --- 2. Augmentation / Transform Logic ---
-def get_transforms(mode='train', img_size=224):
-    """
-    Campus-specific augmentation strategy.
-    
-    For building recognition, we CAN use some spatial augmentation
-    because buildings are large and identifiable from different angles.
-    """
+# --- 2. Augmentation / Transform Logic ---
+def get_transforms(mode="train", img_size=224):
     mean = [0.485, 0.456, 0.406]
-    std = [0.229, 0.224, 0.225]
+    std  = [0.229, 0.224, 0.225]
 
-    if mode == 'train':
+    if mode == "train":
+        # Keep this mild; retrieval systems hate heavy stochastic transforms
         return transforms.Compose([
-            # 1. Resize first to ensure we keep the building in frame
             transforms.Resize(256),
-            
-            # 2. Mild random crop (simulates different viewpoints)
-            # 224/256 = 87.5% of image, keeps main building visible
-            # transforms.RandomCrop(img_size, padding=8, padding_mode='reflect'),
-            
-            # 3. Small rotation (simulates camera tilt, ±5 degrees)
-            # transforms.RandomRotation(degrees=5),
-            
-            # 4. Photometric augmentations (IMPORTANT for outdoor scenes)
-            # transforms.ColorJitter(
-            #     brightness=0.4,    # Different times of day
-            #     contrast=0.4,      # Cloudy vs sunny
-            #     saturation=0.3,    # Color variation
-            #     hue=0.05          # Slight color shift
-            # ),
-            
-            # 5. Random perspective (simulates walking at different angles)
-            # transforms.RandomPerspective(distortion_scale=0.2, p=0.3),
-            
-            # 6. Lighting variations
-            # transforms.RandomGrayscale(p=0.05),
-            
-            # 7. Weather simulation
-            # transforms.GaussianBlur(kernel_size=(3, 3), sigma=(0.1, 1.5)),
-            
-            # 8. Convert to tensor
+            # optional: add mild crop if you want
+            # transforms.RandomResizedCrop(img_size, scale=(0.8, 1.0)),
+            transforms.CenterCrop(img_size),  # stable by default
             transforms.ToTensor(),
             transforms.Normalize(mean=mean, std=std),
-            
-            # 9. Random erasing (simulates occlusions like people, trees)
-            # transforms.RandomErasing(p=0.2, scale=(0.02, 0.15)),
         ])
-        
-    else:  # val/test - use center crop for consistency
-        return transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(img_size),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=mean, std=std)
-        ])
-        
+
+    # val / test / db: deterministic
+    return transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(img_size),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=mean, std=std),
+    ])
+
 
 # --- 3. The Helper Function to Create Loaders ---
-def get_dataloader(df, img_dir, batch_size=64, mode='train', num_workers=4, pin_memory=True):
-    transform = get_transforms(mode=mode)
-    dataset = LocalizationDataset(df, img_dir, transform=transform)
-    should_shuffle = (mode == 'train')
+def get_dataloader(
+    df,
+    img_dir,
+    batch_size=64,
+    mode="train",          # "train" | "val" | "test" | "db"
+    num_workers=4,
+    pin_memory=True,
+):
+    """
+    mode semantics:
+      - "train": shuffled + drop_last + train transforms
+      - "val"/"test": no shuffle + no drop_last + val transforms
+      - "db": same as val (for embedding bank / retrieval database)
+    """
+    if mode not in {"train", "val", "test", "db"}:
+        raise ValueError(f"mode must be one of train/val/test/db, got: {mode}")
 
-    kwargs = dict(batch_size=batch_size, shuffle=should_shuffle, num_workers=num_workers, pin_memory=pin_memory, drop_last=(mode == 'train'))
+    tfm_mode = "train" if mode == "train" else "val"
+    transform = get_transforms(mode=tfm_mode)
+
+    dataset = LocalizationDataset(df, img_dir, transform=transform)
+
+    shuffle = (mode == "train")
+    drop_last = (mode == "train")
+
+    kwargs = dict(
+        batch_size=batch_size,
+        shuffle=shuffle,
+        drop_last=drop_last,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
 
     # Only valid when num_workers > 0
     if num_workers > 0:

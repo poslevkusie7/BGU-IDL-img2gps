@@ -1,38 +1,12 @@
-import argparse
-import os
-import random
+import os, random, argparse
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 import pandas as pd
 
-from dataset import get_dataloader
-from model import MultiTaskResNet
-
-class GPSTripletLoss(nn.Module):
-    def __init__(self, margin=0.3, pos_thresh=15.0, neg_thresh=50.0):
-        super().__init__()
-        self.margin = margin
-        self.pos_thresh = pos_thresh
-        self.neg_thresh = neg_thresh
-
-    def forward(self, embeddings, gps_coords):
-        dist_emb = torch.cdist(embeddings, embeddings, p=2)
-        dist_gps = torch.cdist(gps_coords, gps_coords, p=2)
-
-        mask_pos = (dist_gps < self.pos_thresh) & (dist_gps > 0)
-        mask_neg = (dist_gps > self.neg_thresh)
-
-        valid = mask_pos.any(dim=1) & mask_neg.any(dim=1)
-        if not valid.any():
-            return torch.zeros((), device=embeddings.device)
-
-        pos_d = dist_emb.masked_fill(~mask_pos, float("-inf")).max(dim=1).values
-        neg_d = dist_emb.masked_fill(~mask_neg, float("inf")).min(dim=1).values
-
-        loss = torch.relu(pos_d[valid].pow(2) - neg_d[valid].pow(2) + self.margin)
-        return loss.mean()
+from src.dataset import get_dataloader
+from src.model import MDNResNet
 
 def seed_everything(seed=42):
     random.seed(seed)
@@ -40,118 +14,131 @@ def seed_everything(seed=42):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
-def compute_batch_metrics(cls_logits, labels, embeddings, gps):
-    preds = cls_logits.argmax(dim=1)
-    correct = (preds == labels).sum().item()
-    dist_emb = torch.cdist(embeddings, embeddings, p=2)
-    dist_emb.fill_diagonal_(float("inf"))
-    nn_idx = dist_emb.argmin(dim=1)
-    gps_nn = gps[nn_idx]
-    gps_nn_sum = torch.norm(gps - gps_nn, dim=1).sum().item()
-    return {"correct": correct, "gps_nn_sum": gps_nn_sum}
+def mdn_nll(pi_logits, mu, log_sigma, y):
+    """
+    Negative log-likelihood of y under mixture of diagonal Gaussians.
+    pi_logits: [B,K]
+    mu:        [B,K,2]
+    log_sigma: [B,K,2]
+    y:         [B,2]
+    """
+    # log pi
+    log_pi = torch.log_softmax(pi_logits, dim=1)  # [B,K]
+
+    # expand y to [B,K,2]
+    y_exp = y.unsqueeze(1).expand_as(mu)
+
+    # log N(y | mu, sigma)
+    # diagonal Gaussian: sum over dims
+    # log N = -0.5 * [ sum((y-mu)^2 / sigma^2) + sum(log(2pi*sigma^2)) ]
+    sigma2 = torch.exp(2.0 * log_sigma)  # sigma^2
+    diff2 = (y_exp - mu) ** 2
+    log_norm = log_sigma + 0.5 * torch.log(torch.tensor(2.0 * torch.pi, device=y.device))
+    # per-dim: -0.5 * (diff^2/sigma^2) - log(sigma*sqrt(2pi))
+    log_comp = -0.5 * (diff2 / sigma2) - log_norm
+    log_comp = log_comp.sum(dim=2)  # [B,K]
+
+    # logsumexp over K components
+    log_prob = torch.logsumexp(log_pi + log_comp, dim=1)  # [B]
+    return (-log_prob).mean()
 
 @torch.no_grad()
-def evaluate(model, dataloader, criterion_cls, criterion_triplet, lambda_weight, device, amp=False):
+def mdn_predict(pi_logits, mu, log_sigma, mode="mean"):
+    """
+    mode:
+      - "mean": E[y] = sum pi * mu
+      - "map":  mu[argmax pi]
+    """
+    pi = torch.softmax(pi_logits, dim=1)  # [B,K]
+    if mode == "mean":
+        return (pi.unsqueeze(-1) * mu).sum(dim=1)  # [B,2]
+    else:
+        k = torch.argmax(pi, dim=1)                # [B]
+        return mu[torch.arange(mu.size(0), device=mu.device), k]
+
+@torch.no_grad()
+def evaluate(model, loader, device, amp=False, pred_mode="mean"):
     model.eval()
-    total, total_cls, total_trip, total_correct, total_gps_nn, n = 0.0, 0.0, 0.0, 0, 0.0, 0
-    for images, labels, gps in dataloader:
-        images, labels, gps = images.to(device), labels.to(device), gps.to(device)
-        with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=amp):
-            cls_out, emb_out = model(images)
-            loss_cls = criterion_cls(cls_out, labels)
-            loss_trip = criterion_triplet(emb_out, gps)
-            loss = loss_cls + lambda_weight * loss_trip
-        
-        m = compute_batch_metrics(cls_out, labels, emb_out, gps)
-        total_correct += m["correct"]
-        total_gps_nn += m["gps_nn_sum"]
+    total_nll = 0.0
+    total = 0
+    errs = []
+
+    for images, _labels, gps in loader:
+        images = images.to(device)
+        gps = gps.to(device)
+
+        with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=amp and device.type=="cuda"):
+            pi_logits, mu, log_sigma = model(images)
+            nll = mdn_nll(pi_logits, mu, log_sigma, gps)
+
+        pred = mdn_predict(pi_logits, mu, log_sigma, mode=pred_mode)
+        err = torch.norm(pred - gps, dim=1)  # meters
+        errs.append(err.detach().cpu())
+
         bs = images.size(0)
-        total += loss.item() * bs
-        total_cls += loss_cls.item() * bs
-        total_trip += loss_trip.item() * bs
-        n += bs
-    return total/n, total_cls/n, total_trip/n, total_correct/n, total_gps_nn/n
+        total_nll += float(nll) * bs
+        total += bs
 
-def train_model(model, train_loader, val_loader, epochs=20, device="cuda", lr=1e-2, lambda_weight=0.0, amp=True):
-    device = torch.device(device if torch.cuda.is_available() else "cpu")
-    model.to(device)
-    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
-    criterion_cls = nn.CrossEntropyLoss()
-    criterion_triplet = GPSTripletLoss()
-    scaler = torch.cuda.amp.GradScaler(enabled=amp)
-
-    # Global TQDM bar over all epochs and batches
-    total_steps = epochs * len(train_loader)
-    pbar = tqdm(total=total_steps, desc="Training Progress")
-
-    for epoch in range(1, epochs + 1):
-        model.train()
-        running_correct, seen = 0, 0
-        
-        for images, labels, gps in train_loader:
-            images, labels, gps = images.to(device), labels.to(device), gps.to(device)
-            optimizer.zero_grad(set_to_none=True)
-            
-            with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=amp):
-                cls_out, emb_out = model(images)
-
-            l_cls = criterion_cls(cls_out, labels)
-            l_trip = criterion_triplet(emb_out, gps)
-            loss = l_cls + (lambda_weight * l_trip)
-            
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            
-            seen += images.size(0)
-            running_correct += (cls_out.argmax(1) == labels).sum().item()
-            
-            # Update global bar per batch
-            pbar.update(1)
-            pbar.set_postfix({
-                "ep": epoch,
-                "loss": f"{loss.item():.4f}",
-                "acc": f"{running_correct/seen:.4f}"
-            })
-        
-        scheduler.step()
-        
-        # Validation update at end of epoch
-        if val_loader:
-            v_loss, _, _, v_acc, _ = evaluate(model, val_loader, criterion_cls, criterion_triplet, lambda_weight, device, amp)
-            # Log validation to the bar's description or postfix
-            pbar.write(f"[Epoch {epoch}] Val Acc: {v_acc:.4f}, Val Loss: {v_loss:.4f}")
-
-    pbar.close()
-    return model
+    errs = torch.cat(errs)
+    mean_err = float(errs.mean())
+    med_err = float(errs.median())
+    return total_nll / max(total,1), mean_err, med_err
 
 def main():
-    CSV_PATH = "data/metadata1.csv"
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--csv", default="data/metadata1.csv")
+    ap.add_argument("--img_dir", default="data/images")
+    ap.add_argument("--epochs", type=int, default=20)
+    ap.add_argument("--batch_size", type=int, default=32)
+    ap.add_argument("--lr", type=float, default=1e-4)
+    ap.add_argument("--K", type=int, default=5)
+    ap.add_argument("--amp", action="store_true")
+    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--save", default="mdn.pt")
+    ap.add_argument("--pred_mode", choices=["mean","map"], default="mean")
+    args = ap.parse_args()
 
-    seed_everything()
+    seed_everything(args.seed)
 
-    df = pd.read_csv(CSV_PATH)
-    if not {"image_id", "sector_label", "lat", "lon"}.issubset(df.columns):
-        missing = sorted({"image_id", "sector_label", "lat", "lon"} - set(df.columns))
-        raise KeyError(f"metadata.csv missing required columns: {missing}")
-
-    # Ensure labels are 0..(num_classes-1) for CrossEntropyLoss
+    df = pd.read_csv(args.csv)
     df["sector_label"] = pd.factorize(df["sector_label"])[0].astype(int)
-    
-    train_df = df.sample(frac=0.9, random_state=42)
+
+    # IMPORTANT: if you can, use stratified split for stability
+    train_df = df.sample(frac=0.9, random_state=args.seed)
     val_df = df.drop(train_df.index)
 
-    train_loader = get_dataloader(train_df, "data/images", mode="train")
-    val_loader = get_dataloader(val_df, "data/images", mode="val")
+    train_loader = get_dataloader(train_df, args.img_dir, batch_size=64, mode="train")
+    val_loader   = get_dataloader(val_df,   args.img_dir, batch_size=64, mode="val")
 
-    num_sectors = df["sector_label"].nunique()
-    model = MultiTaskResNet(num_sectors=num_sectors)
-    
-    model = train_model(model, train_loader, val_loader, epochs=20)
-    
-    torch.save(model.state_dict(), "model.pt")
-    print("Training complete. Model saved to model.pt")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model = MDNResNet(K=args.K).to(device)
+    opt = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    scaler = torch.cuda.amp.GradScaler(enabled=args.amp and device.type=="cuda")
+
+    for ep in range(1, args.epochs+1):
+        model.train()
+        pbar = tqdm(train_loader, desc=f"MDN Epoch {ep}/{args.epochs}")
+        for images, _labels, gps in pbar:
+            images = images.to(device)
+            gps = gps.to(device)
+
+            opt.zero_grad(set_to_none=True)
+            with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=args.amp and device.type=="cuda"):
+                pi_logits, mu, log_sigma = model(images)
+                loss = mdn_nll(pi_logits, mu, log_sigma, gps)
+
+            scaler.scale(loss).backward()
+            scaler.step(opt)
+            scaler.update()
+
+            pbar.set_postfix(nll=float(loss))
+
+        val_nll, mean_err, med_err = evaluate(model, val_loader, device, amp=args.amp, pred_mode=args.pred_mode)
+        print(f"[Epoch {ep}] Val NLL: {val_nll:.4f} | MeanErr(m): {mean_err:.2f} | MedErr(m): {med_err:.2f}")
+
+    torch.save(model.state_dict(), args.save)
+    print(f"Saved: {args.save}")
 
 if __name__ == "__main__":
     main()

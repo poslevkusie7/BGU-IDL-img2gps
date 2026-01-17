@@ -24,4 +24,4 @@ def plot_with_folium(csv_path, output_html):
     print(f"Map saved to {output_html}")
 
 # Usage
-plot_with_folium('data/metadata.csv', 'my_osm_map.html')
+plot_with_folium('data/metadata1.csv', 'my_osm_map.html')

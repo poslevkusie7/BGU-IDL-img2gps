@@ -603,8 +603,12 @@ def evaluate_multitask(model, dataloader, device, amp, coord_stats, coord_norm, 
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", help="Path to YAML config.", default=None)
+    # First parse only the config path so we can load defaults.
+    config_parser = argparse.ArgumentParser(add_help=False)
+    config_parser.add_argument("--config", help="Path to YAML config.", default=None)
+    cfg_args, remaining = config_parser.parse_known_args()
+
+    parser = argparse.ArgumentParser(parents=[config_parser])
     parser.add_argument("--task", choices=["coords", "region", "multitask"], required=False)
     parser.add_argument("--csv-path", default="data/metadata1.csv")
     parser.add_argument("--img-dir", default="data/images")
@@ -636,12 +640,11 @@ def main():
     parser.add_argument("--scheduler", choices=["none", "cosine", "cosine_warmup"], default="cosine_warmup")
     parser.add_argument("--warmup-steps", type=int, default=100)
 
-    # Two-pass parsing to allow YAML configs to set defaults.
-    args, remaining = parser.parse_known_args()
-    if args.config:
-        cfg = load_config(args.config)
+    if cfg_args.config:
+        cfg = load_config(cfg_args.config)
         parser.set_defaults(**cfg)
-    args = parser.parse_args(remaining, namespace=args)
+
+    args = parser.parse_args(remaining)
 
     if args.task is None:
         parser.error("--task is required (coords, region, multitask)")

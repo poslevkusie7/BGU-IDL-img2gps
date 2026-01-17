@@ -20,11 +20,16 @@ data/
 ```
 
 ## Training
-In the root of the project: 
+CLI (regression example):
 ```
 python -m src.train --task coords --csv-path data/metadata1.csv --img-dir data/images --pretrained --amp --coord-mode utm --coord-norm standard --batch-size 16
-
 ```
+
+Multitask (Swin classification + DINOv2 regression) via YAML:
+```
+python -m src.train --config config/example.yaml
+```
+CLI args override config values.
 
 ## Notes
 - `sector_label` is auto-factorized to `0..N-1`.

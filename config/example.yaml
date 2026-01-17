@@ -1,0 +1,30 @@
+task: multitask  # options: coords, region, multitask
+csv_path: data/metadata1.csv
+img_dir: data/images
+batch_size: 16
+epochs: 10
+lr: 1.0e-4
+weight_decay: 1.0e-4
+num_workers: 4
+seed: 42
+amp: true
+optimizer: adamw
+save_path: model.pt
+best_path: best_model.pt
+freeze_epochs: 0
+randaugment: false
+ra_n: 2
+ra_m: 9
+mixup_alpha: 0.0
+cutmix_alpha: 0.0
+mixup_prob: 0.0
+focal_gamma: 2.0
+hard_mining_ratio: 1.0
+coord_mode: latlon
+coord_norm: standard
+dinov2_name: vit_base_patch14_dinov2.lvd142m
+pretrained: true
+cls_weight: 1.0
+coord_weight: 1.0
+scheduler: cosine_warmup   # options: none, cosine, cosine_warmup
+warmup_steps: 100

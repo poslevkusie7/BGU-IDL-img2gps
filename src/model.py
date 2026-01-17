@@ -76,3 +76,38 @@ class SwinRegionClassifier(nn.Module):
     def unfreeze_backbone(self):
         for p in self.backbone.parameters():
             p.requires_grad = True
+
+
+class MultiTaskModel(nn.Module):
+    """
+    Two-head model: DINOv2 regression head + Swin classification head.
+    Backbones are independent so each can specialize.
+    """
+
+    def __init__(
+        self,
+        num_classes,
+        coord_model_name="vit_base_patch14_dinov2.lvd142m",
+        pretrained=True,
+        drop_rate=0.1,
+    ):
+        super().__init__()
+        self.regressor = DinoV2CoordRegressor(
+            pretrained=pretrained,
+            model_name=coord_model_name,
+            drop_rate=drop_rate,
+        )
+        self.classifier = SwinRegionClassifier(num_classes=num_classes, pretrained=pretrained, drop_rate=drop_rate)
+
+    def forward(self, x):
+        coords = self.regressor(x)
+        logits = self.classifier(x)
+        return logits, coords
+
+    def freeze_backbones(self):
+        self.regressor.freeze_backbone()
+        self.classifier.freeze_backbone()
+
+    def unfreeze_backbones(self):
+        self.regressor.unfreeze_backbone()
+        self.classifier.unfreeze_backbone()

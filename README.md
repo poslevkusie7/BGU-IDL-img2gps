@@ -20,14 +20,10 @@ data/
 ```
 
 ## Training
-Coordinate regression (DINOv2 ViT-B/14 + regression head): in the root of the project
-```bash
-python -m src.train_tasks --task coords --csv-path data/metadata1.csv --img-dir data/images --pretrained --amp
+In the root of the project: 
 ```
+python -m src.train_tasks --task coords --csv-path data/metadata1.csv --img-dir data/images --pretrained --amp --coord-mode utm --coord-norm standard --batch-size 16
 
-Region classification (Swin Base):
-```bash
-python -m src.train_tasks --task region --csv-path data/metadata1.csv --img-dir data/images --pretrained --amp --randaugment
 ```
 
 ## Notes

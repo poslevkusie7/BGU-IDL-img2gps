@@ -57,21 +57,41 @@ class SwinRegionClassifier(nn.Module):
 
     def __init__(self, num_classes=3, pretrained=True, drop_rate=0.1):
         super().__init__()
-        weights = models.Swin_B_Weights.DEFAULT if pretrained else None
-        self.backbone = models.swin_base_patch4_window7_224(weights=weights)
-        in_features = self.backbone.head.in_features
-        self.backbone.head = nn.Sequential(
-            nn.Dropout(drop_rate),
-            nn.Linear(in_features, num_classes),
-        )
+        self.use_timm_head = False
+        if hasattr(models, "swin_base_patch4_window7_224"):
+            weights = models.Swin_B_Weights.DEFAULT if pretrained else None
+            self.backbone = models.swin_base_patch4_window7_224(weights=weights)
+            in_features = self.backbone.head.in_features
+            self.backbone.head = nn.Sequential(
+                nn.Dropout(drop_rate),
+                nn.Linear(in_features, num_classes),
+            )
+        elif timm is not None:
+            # Fallback for older torchvision; use timm implementation.
+            self.backbone = timm.create_model(
+                "swin_base_patch4_window7_224",
+                pretrained=pretrained,
+                num_classes=num_classes,
+                drop_rate=drop_rate,
+            )
+            self.use_timm_head = True
+        else:
+            raise ImportError(
+                "Swin transformer not available. Upgrade torchvision to 0.15+ or install timm."
+            )
 
     def forward(self, x):
         return self.backbone(x)
 
     def freeze_backbone(self):
-        for name, p in self.backbone.named_parameters():
-            if not name.startswith("head."):
-                p.requires_grad = False
+        if self.use_timm_head:
+            for name, p in self.backbone.named_parameters():
+                if not name.startswith("head"):
+                    p.requires_grad = False
+        else:
+            for name, p in self.backbone.named_parameters():
+                if not name.startswith("head."):
+                    p.requires_grad = False
 
     def unfreeze_backbone(self):
         for p in self.backbone.parameters():

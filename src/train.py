@@ -238,7 +238,7 @@ def train_region(
     optimizer = get_optimizer(optimizer_name, model.parameters(), lr, weight_decay)
     total_steps = epochs * len(train_loader)
     scheduler, per_step = build_scheduler(optimizer, scheduler_name, warmup_steps, total_steps)
-    scaler = torch.cuda.amp.GradScaler(enabled=(amp and device.type == "cuda"))
+    scaler = torch.amp.GradScaler("cuda", enabled=(amp and device.type == "cuda"))
 
     for epoch in range(1, epochs + 1):
         model.train()
@@ -353,7 +353,7 @@ def train_coords(
     optimizer = get_optimizer(optimizer_name, model.parameters(), lr, weight_decay)
     total_steps = epochs * len(train_loader)
     scheduler, per_step = build_scheduler(optimizer, scheduler_name, warmup_steps, total_steps)
-    scaler = torch.cuda.amp.GradScaler(enabled=(amp and device.type == "cuda"))
+    scaler = torch.amp.GradScaler("cuda", enabled=(amp and device.type == "cuda"))
 
     for epoch in range(1, epochs + 1):
         model.train()
@@ -427,7 +427,7 @@ def train_multitask(
     optimizer = get_optimizer(optimizer_name, model.parameters(), lr, weight_decay)
     total_steps = epochs * len(train_loader)
     scheduler, per_step = build_scheduler(optimizer, scheduler_name, warmup_steps, total_steps)
-    scaler = torch.cuda.amp.GradScaler(enabled=(amp and device.type == "cuda"))
+    scaler = torch.amp.GradScaler("cuda", enabled=(amp and device.type == "cuda"))
 
     for epoch in range(1, epochs + 1):
         model.train()

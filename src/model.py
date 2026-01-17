@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torchvision import models
 
 try:
@@ -58,6 +59,7 @@ class SwinRegionClassifier(nn.Module):
     def __init__(self, num_classes=3, pretrained=True, drop_rate=0.1):
         super().__init__()
         self.use_timm_head = False
+        self.input_size = 224
         if hasattr(models, "swin_base_patch4_window7_224"):
             weights = models.Swin_B_Weights.DEFAULT if pretrained else None
             self.backbone = models.swin_base_patch4_window7_224(weights=weights)
@@ -75,6 +77,10 @@ class SwinRegionClassifier(nn.Module):
                 drop_rate=drop_rate,
             )
             self.use_timm_head = True
+            try:
+                self.input_size = timm.data.resolve_model_data_config(self.backbone)["input_size"][1]
+            except Exception:
+                self.input_size = 224
         else:
             raise ImportError(
                 "Swin transformer not available. Upgrade torchvision to 0.15+ or install timm."
@@ -118,10 +124,15 @@ class MultiTaskModel(nn.Module):
             drop_rate=drop_rate,
         )
         self.classifier = SwinRegionClassifier(num_classes=num_classes, pretrained=pretrained, drop_rate=drop_rate)
+        self.cls_input_size = getattr(self.classifier, "input_size", 224)
 
     def forward(self, x):
         coords = self.regressor(x)
-        logits = self.classifier(x)
+        if x.shape[-1] != self.cls_input_size:
+            cls_inp = F.interpolate(x, size=(self.cls_input_size, self.cls_input_size), mode="bilinear", align_corners=False)
+        else:
+            cls_inp = x
+        logits = self.classifier(cls_inp)
         return logits, coords
 
     def freeze_backbones(self):

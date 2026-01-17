@@ -151,45 +151,9 @@ def build_scheduler(optimizer, scheduler_name, warmup_steps, total_steps):
     raise ValueError(f"Unsupported scheduler: {scheduler_name}")
 
 
-def compute_regression_loss(
-    preds,
-    targets,
-    coord_stats,
-    coord_norm,
-    coord_mode,
-    loss_name,
-    margin_m,
-    margin_weight,
-    return_dist=False,
-):
-    dist = None
-    if loss_name == "mse":
-        base = nn.functional.mse_loss(preds, targets, reduction="mean")
-    elif loss_name == "haversine":
-        if coord_mode != "latlon":
-            raise ValueError("haversine loss requires coord_mode='latlon'.")
-        denorm_preds = denormalize_coords(preds, coord_stats, coord_norm)
-        denorm_targets = denormalize_coords(targets, coord_stats, coord_norm)
-        dist = haversine_m(denorm_preds, denorm_targets)
-        base = dist.mean()
-    else:
-        raise ValueError(f"Unsupported reg_loss: {loss_name}")
+def compute_regression_loss(preds, targets):
+    return nn.functional.mse_loss(preds, targets, reduction="mean")
 
-    if margin_weight > 0:
-        if dist is None:
-            denorm_preds = denormalize_coords(preds, coord_stats, coord_norm)
-            denorm_targets = denormalize_coords(targets, coord_stats, coord_norm)
-            dist = distance_m(denorm_preds, denorm_targets, coord_mode)
-        margin = torch.relu(dist - margin_m)
-        base = base + margin_weight * (margin ** 2).mean()
-
-    if return_dist:
-        if dist is None:
-            denorm_preds = denormalize_coords(preds, coord_stats, coord_norm)
-            denorm_targets = denormalize_coords(targets, coord_stats, coord_norm)
-            dist = distance_m(denorm_preds, denorm_targets, coord_mode)
-        return base, dist
-    return base
 
 
 
@@ -211,10 +175,7 @@ def train_coords(
     scheduler_name,
     warmup_steps,
     save_best_cb,
-    accum_steps,
-    reg_loss,
-    reg_margin_m,
-    reg_margin_weight,
+    accum_steps
 ):
     optimizer = get_optimizer(optimizer_name, model.parameters(), lr, weight_decay)
     total_steps = math.ceil(epochs * len(train_loader) / max(1, accum_steps))
@@ -238,16 +199,7 @@ def train_coords(
 
             with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(amp and device.type == "cuda")):
                 preds = model(images)
-                loss = compute_regression_loss(
-                    preds,
-                    coords,
-                    coord_stats,
-                    coord_norm,
-                    coord_mode,
-                    reg_loss,
-                    reg_margin_m,
-                    reg_margin_weight,
-                )
+                loss = compute_regression_loss(preds, coords)
 
             loss_value = loss.item()
             loss = loss / max(1, accum_steps)
@@ -275,14 +227,11 @@ def train_coords(
                 amp,
                 coord_stats,
                 coord_norm,
-                coord_mode,
-                reg_loss,
-                reg_margin_m,
-                reg_margin_weight,
+                coord_mode
             )
             print(
                 f"Epoch {epoch}: train_loss={running_loss / max(seen, 1):.6f} "
-                f"val_loss={val_loss:.6f} val_mse={val_mse:.6f} "
+                f"val_loss={val_loss:.6f} val_mse={val_mse:.3e} "
                 f"val_dist_m={val_dist_m:.2f} p10m={val_p10:.3f} p25m={val_p25:.3f}"
             )
             if save_best_cb is not None:
@@ -310,10 +259,7 @@ def train_multitask(
     scheduler_name,
     warmup_steps,
     save_best_cb,
-    accum_steps,
-    reg_loss_name,
-    reg_margin_m,
-    reg_margin_weight,
+    accum_steps
 ):
     cls_criterion = nn.CrossEntropyLoss()
     optimizer = get_optimizer(optimizer_name, model.parameters(), lr, weight_decay)
@@ -345,17 +291,7 @@ def train_multitask(
             with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(amp and device.type == "cuda")):
                 logits, preds = model(images)
                 cls_loss = cls_criterion(logits, labels)
-                reg_loss, dist = compute_regression_loss(
-                    preds,
-                    coords,
-                    coord_stats,
-                    coord_norm,
-                    coord_mode,
-                    reg_loss_name,
-                    reg_margin_m,
-                    reg_margin_weight,
-                    return_dist=True,
-                )
+                reg_loss = compute_regression_loss(preds, coords)
                 loss = cls_weight * cls_loss + coord_weight * reg_loss
 
             loss_value_cls = cls_loss.item()
@@ -373,7 +309,9 @@ def train_multitask(
 
             preds_cls = logits.argmax(dim=1)
             acc = (preds_cls == labels).sum().item()
-            # dist is in meters when return_dist=True
+            denorm_preds = denormalize_coords(preds, coord_stats, coord_norm)
+            denorm_targets = denormalize_coords(coords, coord_stats, coord_norm)
+            dist = distance_m(denorm_preds, denorm_targets, coord_mode)
 
             bs = images.size(0)
             running_cls_loss += loss_value_cls * bs
@@ -407,10 +345,7 @@ def train_multitask(
                 coord_stats,
                 coord_norm,
                 coord_mode,
-                cls_criterion,
-                reg_loss_name,
-                reg_margin_m,
-                reg_margin_weight,
+                cls_criterion
             )
             print(
                 f"Epoch {epoch}: cls_loss={running_cls_loss / max(seen,1):.4f} "
@@ -439,9 +374,6 @@ def evaluate_coords(
     coord_stats,
     coord_norm,
     coord_mode,
-    reg_loss,
-    reg_margin_m,
-    reg_margin_weight,
 ):
     model.eval()
     running_loss = 0.0
@@ -455,16 +387,7 @@ def evaluate_coords(
         coords = coords.to(device, non_blocking=True)
         with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(amp and device.type == "cuda")):
             preds = model(images)
-            loss = compute_regression_loss(
-                preds,
-                coords,
-                coord_stats,
-                coord_norm,
-                coord_mode,
-                reg_loss,
-                reg_margin_m,
-                reg_margin_weight,
-            )
+            reg_loss = compute_regression_loss(preds, coords)
         denorm_preds = denormalize_coords(preds, coord_stats, coord_norm)
         denorm_targets = denormalize_coords(coords, coord_stats, coord_norm)
         mse = nn.functional.mse_loss(denorm_preds, denorm_targets, reduction="mean")
@@ -473,7 +396,7 @@ def evaluate_coords(
         p25 = (dist <= 25.0).float().mean()
 
         bs = images.size(0)
-        running_loss += loss.item() * bs
+        running_loss += reg_loss.item() * bs
         running_mse += mse.item() * bs
         running_dist += dist.mean().item() * bs
         running_p10 += p10.item() * bs
@@ -498,10 +421,7 @@ def evaluate_multitask(
     coord_stats,
     coord_norm,
     coord_mode,
-    cls_criterion,
-    reg_loss_name,
-    reg_margin_m,
-    reg_margin_weight,
+    cls_criterion
 ):
     model.eval()
     running_cls_loss = 0.0
@@ -518,16 +438,8 @@ def evaluate_multitask(
         with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(amp and device.type == "cuda")):
             logits, preds = model(images)
             cls_loss = cls_criterion(logits, labels)
-            reg_loss = compute_regression_loss(
-                preds,
-                coords,
-                coord_stats,
-                coord_norm,
-                coord_mode,
-                reg_loss_name,
-                reg_margin_m,
-                reg_margin_weight,
-            )
+            reg_loss = compute_regression_loss(preds, coords)
+
 
         preds_cls = logits.argmax(dim=1)
         acc = (preds_cls == labels).float().mean()
@@ -587,13 +499,6 @@ def main():
     parser.add_argument("--scheduler", choices=["none", "cosine", "cosine_warmup"], default="cosine_warmup")
     parser.add_argument("--warmup-steps", type=int, default=100)
     parser.add_argument("--accum-steps", type=int, default=1, help="Gradient accumulation steps.")
-    parser.add_argument(
-        "--reg-loss",
-        choices=["mse", "haversine"],
-        default="mse",
-    )
-    parser.add_argument("--reg-margin-m", type=float, default=10.0)
-    parser.add_argument("--reg-margin-weight", type=float, default=0.0)
 
     if cfg_args.config:
         cfg = load_config(cfg_args.config)
@@ -693,9 +598,6 @@ def main():
                 "coord_stats": coord_stats,
                 "coord_norm": args.coord_norm,
                 "coord_mode": args.coord_mode,
-                "reg_loss": args.reg_loss,
-                "reg_margin_m": args.reg_margin_m,
-                "reg_margin_weight": args.reg_margin_weight,
             },
             args.best_path,
         )
@@ -716,10 +618,7 @@ def main():
             args.scheduler,
             args.warmup_steps,
             save_best,
-            args.accum_steps,
-            args.reg_loss,
-            args.reg_margin_m,
-            args.reg_margin_weight,
+            args.accum_steps
         )
         save_payload = {
             "task": "coords",
@@ -727,9 +626,6 @@ def main():
             "coord_stats": coord_stats,
             "coord_norm": args.coord_norm,
             "coord_mode": args.coord_mode,
-            "reg_loss": args.reg_loss,
-            "reg_margin_m": args.reg_margin_m,
-            "reg_margin_weight": args.reg_margin_weight,
         }
     else:
         num_classes = int(df["sector_label"].nunique())
@@ -745,9 +641,6 @@ def main():
                 "coord_stats": coord_stats,
                 "coord_norm": args.coord_norm,
                 "coord_mode": args.coord_mode,
-                "reg_loss": args.reg_loss,
-                "reg_margin_m": args.reg_margin_m,
-                "reg_margin_weight": args.reg_margin_weight,
             },
             args.best_path,
         )
@@ -770,10 +663,7 @@ def main():
             args.scheduler,
             args.warmup_steps,
             save_best,
-            args.accum_steps,
-            args.reg_loss,
-            args.reg_margin_m,
-            args.reg_margin_weight,
+            args.accum_steps
         )
         save_payload = {
             "task": "multitask",
@@ -781,10 +671,7 @@ def main():
             "num_classes": num_classes,
             "coord_stats": coord_stats,
             "coord_norm": args.coord_norm,
-            "coord_mode": args.coord_mode,
-            "reg_loss": args.reg_loss,
-            "reg_margin_m": args.reg_margin_m,
-            "reg_margin_weight": args.reg_margin_weight,
+            "coord_mode": args.coord_mode
         }
 
     torch.save(save_payload, args.save_path)

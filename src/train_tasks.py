@@ -145,8 +145,9 @@ def cutmix_data(x, y, alpha):
 
 
 def denormalize_coords(coords, coord_stats, coord_norm):
-    mean = torch.tensor(coord_stats["mean"], device=coords.device, dtype=coords.dtype)
-    std = torch.tensor(coord_stats["std"], device=coords.device, dtype=coords.dtype)
+    coords = coords.float()
+    mean = torch.tensor(coord_stats["mean"], device=coords.device, dtype=torch.float32)
+    std = torch.tensor(coord_stats["std"], device=coords.device, dtype=torch.float32)
     if coord_norm == "standard":
         return coords * std + mean
     if coord_norm == "center":

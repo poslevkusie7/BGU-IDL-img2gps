@@ -28,3 +28,5 @@ cls_weight: 1.0
 coord_weight: 1.0
 scheduler: cosine_warmup   # options: none, cosine, cosine_warmup
 warmup_steps: 100
+accum_steps: 1
+cls_model_name: swin_base_patch4_window7_224   # swap to swin_tiny_patch4_window7_224 to save memory

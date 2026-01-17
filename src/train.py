@@ -233,12 +233,14 @@ def train_region(
     scheduler_name,
     warmup_steps,
     save_best_cb,
+    accum_steps,
 ):
     criterion = FocalLoss(gamma=focal_gamma, reduction="none")
     optimizer = get_optimizer(optimizer_name, model.parameters(), lr, weight_decay)
-    total_steps = epochs * len(train_loader)
+    total_steps = math.ceil(epochs * len(train_loader) / max(1, accum_steps))
     scheduler, per_step = build_scheduler(optimizer, scheduler_name, warmup_steps, total_steps)
     scaler = torch.amp.GradScaler("cuda", enabled=(amp and device.type == "cuda"))
+    optimizer.zero_grad(set_to_none=True)
 
     for epoch in range(1, epochs + 1):
         model.train()
@@ -251,7 +253,7 @@ def train_region(
         running_correct = 0
         seen = 0
         bar = tqdm(train_loader, desc=f"Train {epoch}/{epochs}", leave=False)
-        for images, labels, _ in bar:
+        for step_idx, (images, labels, _) in enumerate(bar):
             images = images.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
 
@@ -264,7 +266,6 @@ def train_region(
                 images, y_a, y_b, lam = cutmix_data(images, labels, cutmix_alpha)
                 mix_mode = "cutmix"
 
-            optimizer.zero_grad(set_to_none=True)
             with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(amp and device.type == "cuda")):
                 logits = model(images)
                 if mix_mode:
@@ -278,20 +279,24 @@ def train_region(
                         per_sample, _ = torch.topk(per_sample, k)
                     loss = per_sample.mean()
 
+            loss_value = loss.item()
+            loss = loss / max(1, accum_steps)
             scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            if scheduler is not None and per_step:
-                scheduler.step()
+            do_step = ((step_idx + 1) % max(1, accum_steps) == 0) or (step_idx + 1 == len(train_loader))
+            if do_step:
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad(set_to_none=True)
+                if scheduler is not None and per_step:
+                    scheduler.step()
 
             preds = logits.argmax(dim=1)
             running_correct += (preds == labels).sum().item()
             bs = images.size(0)
-            running_loss += loss.item() * bs
+            running_loss += loss_value * bs
             seen += bs
             bar.set_postfix(loss=running_loss / max(seen, 1))
 
-        scheduler.step()
         train_acc = running_correct / max(seen, 1)
 
         if val_loader is not None:
@@ -348,12 +353,14 @@ def train_coords(
     scheduler_name,
     warmup_steps,
     save_best_cb,
+    accum_steps,
 ):
     criterion = nn.MSELoss()
     optimizer = get_optimizer(optimizer_name, model.parameters(), lr, weight_decay)
-    total_steps = epochs * len(train_loader)
+    total_steps = math.ceil(epochs * len(train_loader) / max(1, accum_steps))
     scheduler, per_step = build_scheduler(optimizer, scheduler_name, warmup_steps, total_steps)
     scaler = torch.amp.GradScaler("cuda", enabled=(amp and device.type == "cuda"))
+    optimizer.zero_grad(set_to_none=True)
 
     for epoch in range(1, epochs + 1):
         model.train()
@@ -365,23 +372,27 @@ def train_coords(
         running_loss = 0.0
         seen = 0
         bar = tqdm(train_loader, desc=f"Train {epoch}/{epochs}", leave=False)
-        for images, _, coords in bar:
+        for step_idx, (images, _, coords) in enumerate(bar):
             images = images.to(device, non_blocking=True)
             coords = coords.to(device, non_blocking=True)
 
-            optimizer.zero_grad(set_to_none=True)
             with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(amp and device.type == "cuda")):
                 preds = model(images)
                 loss = criterion(preds, coords)
 
+            loss_value = loss.item()
+            loss = loss / max(1, accum_steps)
             scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            if scheduler is not None and per_step:
-                scheduler.step()
+            do_step = ((step_idx + 1) % max(1, accum_steps) == 0) or (step_idx + 1 == len(train_loader))
+            if do_step:
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad(set_to_none=True)
+                if scheduler is not None and per_step:
+                    scheduler.step()
 
             bs = images.size(0)
-            running_loss += loss.item() * bs
+            running_loss += loss_value * bs
             seen += bs
             bar.set_postfix(loss=running_loss / max(seen, 1))
 
@@ -421,13 +432,15 @@ def train_multitask(
     scheduler_name,
     warmup_steps,
     save_best_cb,
+    accum_steps,
 ):
     cls_criterion = nn.CrossEntropyLoss()
     reg_criterion = nn.MSELoss()
     optimizer = get_optimizer(optimizer_name, model.parameters(), lr, weight_decay)
-    total_steps = epochs * len(train_loader)
+    total_steps = math.ceil(epochs * len(train_loader) / max(1, accum_steps))
     scheduler, per_step = build_scheduler(optimizer, scheduler_name, warmup_steps, total_steps)
     scaler = torch.amp.GradScaler("cuda", enabled=(amp and device.type == "cuda"))
+    optimizer.zero_grad(set_to_none=True)
 
     for epoch in range(1, epochs + 1):
         model.train()
@@ -444,23 +457,29 @@ def train_multitask(
         running_p25 = 0.0
         seen = 0
         bar = tqdm(train_loader, desc=f"Train {epoch}/{epochs}", leave=False)
-        for images, labels, coords in bar:
+        for step_idx, (images, labels, coords) in enumerate(bar):
             images = images.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             coords = coords.to(device, non_blocking=True)
 
-            optimizer.zero_grad(set_to_none=True)
             with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(amp and device.type == "cuda")):
                 logits, preds = model(images)
                 cls_loss = cls_criterion(logits, labels)
                 reg_loss = reg_criterion(preds, coords)
                 loss = cls_weight * cls_loss + coord_weight * reg_loss
 
+            loss_value_cls = cls_loss.item()
+            loss_value_reg = reg_loss.item()
+            loss = loss / max(1, accum_steps)
+
             scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            if scheduler is not None and per_step:
-                scheduler.step()
+            do_step = ((step_idx + 1) % max(1, accum_steps) == 0) or (step_idx + 1 == len(train_loader))
+            if do_step:
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad(set_to_none=True)
+                if scheduler is not None and per_step:
+                    scheduler.step()
 
             preds_cls = logits.argmax(dim=1)
             acc = (preds_cls == labels).sum().item()
@@ -471,8 +490,8 @@ def train_multitask(
             )
 
             bs = images.size(0)
-            running_cls_loss += cls_loss.item() * bs
-            running_reg_loss += reg_loss.item() * bs
+            running_cls_loss += loss_value_cls * bs
+            running_reg_loss += loss_value_reg * bs
             running_cls_acc += acc
             running_dist += dist.mean().item() * bs
             running_p10 += (dist <= 10.0).float().mean().item() * bs
@@ -639,6 +658,8 @@ def main():
     parser.add_argument("--coord-weight", type=float, default=1.0)
     parser.add_argument("--scheduler", choices=["none", "cosine", "cosine_warmup"], default="cosine_warmup")
     parser.add_argument("--warmup-steps", type=int, default=100)
+    parser.add_argument("--accum-steps", type=int, default=1, help="Gradient accumulation steps.")
+    parser.add_argument("--cls-model-name", default="swin_base_patch4_window7_224", help="Swin backbone name.")
 
     if cfg_args.config:
         cfg = load_config(cfg_args.config)
@@ -758,6 +779,7 @@ def main():
             args.scheduler,
             args.warmup_steps,
             save_best,
+            args.accum_steps,
         )
         save_payload = {
             "task": "coords",
@@ -769,7 +791,11 @@ def main():
     else:
         num_classes = int(df["sector_label"].nunique())
         if args.task == "region":
-            model = SwinRegionClassifier(num_classes=num_classes, pretrained=args.pretrained)
+            model = SwinRegionClassifier(
+                num_classes=num_classes,
+                pretrained=args.pretrained,
+                model_name=args.cls_model_name,
+            )
             model.to(device)
             save_best = make_best_saver({"task": "region", "num_classes": num_classes}, args.best_path)
             train_region(
@@ -791,17 +817,20 @@ def main():
                 args.scheduler,
                 args.warmup_steps,
                 save_best,
+                args.accum_steps,
             )
             save_payload = {
                 "task": "region",
                 "model_state": model.state_dict(),
                 "num_classes": num_classes,
+                "cls_model_name": args.cls_model_name,
             }
         else:  # multitask
             model = MultiTaskModel(
                 num_classes=num_classes,
                 coord_model_name=args.dinov2_name,
                 pretrained=args.pretrained,
+                cls_model_name=args.cls_model_name,
             ).to(device)
             save_best = make_best_saver(
                 {
@@ -810,6 +839,7 @@ def main():
                     "coord_stats": coord_stats,
                     "coord_norm": args.coord_norm,
                     "coord_mode": args.coord_mode,
+                    "cls_model_name": args.cls_model_name,
                 },
                 args.best_path,
             )
@@ -832,6 +862,7 @@ def main():
                 args.scheduler,
                 args.warmup_steps,
                 save_best,
+                args.accum_steps,
             )
             save_payload = {
                 "task": "multitask",
@@ -840,6 +871,7 @@ def main():
                 "coord_stats": coord_stats,
                 "coord_norm": args.coord_norm,
                 "coord_mode": args.coord_mode,
+                "cls_model_name": args.cls_model_name,
             }
 
     torch.save(save_payload, args.save_path)

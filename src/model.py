@@ -54,13 +54,14 @@ class DinoV2CoordRegressor(nn.Module):
 
 
 class SwinRegionClassifier(nn.Module):
-    """Swin-B classifier for sector labels."""
+    """Swin classifier for sector labels (supports torchvision or timm backbones)."""
 
-    def __init__(self, num_classes=3, pretrained=True, drop_rate=0.1):
+    def __init__(self, num_classes=3, pretrained=True, drop_rate=0.1, model_name="swin_base_patch4_window7_224"):
         super().__init__()
         self.use_timm_head = False
         self.input_size = 224
-        if hasattr(models, "swin_base_patch4_window7_224"):
+        self.model_name = model_name
+        if model_name == "swin_base_patch4_window7_224" and hasattr(models, "swin_base_patch4_window7_224"):
             weights = models.Swin_B_Weights.DEFAULT if pretrained else None
             self.backbone = models.swin_base_patch4_window7_224(weights=weights)
             in_features = self.backbone.head.in_features
@@ -69,16 +70,18 @@ class SwinRegionClassifier(nn.Module):
                 nn.Linear(in_features, num_classes),
             )
         elif timm is not None:
-            # Fallback for older torchvision; use timm implementation.
+            # Fallback for older torchvision or alternative Swin variants.
             self.backbone = timm.create_model(
-                "swin_base_patch4_window7_224",
+                model_name,
                 pretrained=pretrained,
                 num_classes=num_classes,
                 drop_rate=drop_rate,
             )
             self.use_timm_head = True
             try:
-                self.input_size = timm.data.resolve_model_data_config(self.backbone)["input_size"][1]
+                cfg = timm.data.resolve_model_data_config(self.backbone)
+                # timm returns (C, H, W)
+                self.input_size = cfg["input_size"][1]
             except Exception:
                 self.input_size = 224
         else:
@@ -116,6 +119,7 @@ class MultiTaskModel(nn.Module):
         coord_model_name="vit_base_patch14_dinov2.lvd142m",
         pretrained=True,
         drop_rate=0.1,
+        cls_model_name="swin_base_patch4_window7_224",
     ):
         super().__init__()
         self.regressor = DinoV2CoordRegressor(
@@ -123,7 +127,12 @@ class MultiTaskModel(nn.Module):
             model_name=coord_model_name,
             drop_rate=drop_rate,
         )
-        self.classifier = SwinRegionClassifier(num_classes=num_classes, pretrained=pretrained, drop_rate=drop_rate)
+        self.classifier = SwinRegionClassifier(
+            num_classes=num_classes,
+            pretrained=pretrained,
+            drop_rate=drop_rate,
+            model_name=cls_model_name,
+        )
         self.cls_input_size = getattr(self.classifier, "input_size", 224)
 
     def forward(self, x):

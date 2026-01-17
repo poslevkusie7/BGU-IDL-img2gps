@@ -13,7 +13,7 @@ from torchvision import transforms
 from tqdm import tqdm
 
 from .dataset import LocalizationDataset, compute_coord_stats
-from .model import DinoV2CoordRegressor, SwinRegionClassifier, MultiTaskModel
+from .model import DinoV2CoordRegressor, SharedDinoMultiTask
 
 
 def seed_everything(seed=42):
@@ -29,27 +29,6 @@ def load_config(config_path):
     if not isinstance(cfg, dict):
         raise ValueError("Config file must define a mapping at the top level.")
     return cfg
-
-
-class FocalLoss(nn.Module):
-    def __init__(self, gamma=2.0, alpha=None, reduction="mean"):
-        super().__init__()
-        self.gamma = gamma
-        self.alpha = alpha
-        self.reduction = reduction
-
-    def forward(self, logits, targets):
-        ce = nn.functional.cross_entropy(logits, targets, reduction="none")
-        pt = torch.exp(-ce)
-        loss = ((1 - pt) ** self.gamma) * ce
-        if self.alpha is not None:
-            alpha_t = self.alpha.to(logits.device)[targets]
-            loss = alpha_t * loss
-        if self.reduction == "mean":
-            return loss.mean()
-        if self.reduction == "sum":
-            return loss.sum()
-        return loss
 
 
 class Lookahead(optim.Optimizer):
@@ -119,39 +98,6 @@ def build_transforms(
     )
 
 
-def mixup_data(x, y, alpha):
-    lam = torch.distributions.Beta(alpha, alpha).sample().item()
-    batch_size = x.size(0)
-    index = torch.randperm(batch_size, device=x.device)
-    mixed_x = lam * x + (1 - lam) * x[index]
-    y_a, y_b = y, y[index]
-    return mixed_x, y_a, y_b, lam
-
-
-def rand_bbox(size, lam):
-    h = size[2]
-    w = size[3]
-    cut_rat = (1.0 - lam) ** 0.5
-    cut_w = int(w * cut_rat)
-    cut_h = int(h * cut_rat)
-    cx = torch.randint(0, w, (1,)).item()
-    cy = torch.randint(0, h, (1,)).item()
-    x1 = max(cx - cut_w // 2, 0)
-    y1 = max(cy - cut_h // 2, 0)
-    x2 = min(cx + cut_w // 2, w)
-    y2 = min(cy + cut_h // 2, h)
-    return x1, y1, x2, y2
-
-
-def cutmix_data(x, y, alpha):
-    lam = torch.distributions.Beta(alpha, alpha).sample().item()
-    batch_size = x.size(0)
-    index = torch.randperm(batch_size, device=x.device)
-    x1, y1, x2, y2 = rand_bbox(x.size(), lam)
-    x[:, :, y1:y2, x1:x2] = x[index, :, y1:y2, x1:x2]
-    y_a, y_b = y, y[index]
-    lam = 1 - ((x2 - x1) * (y2 - y1) / (x.size(-1) * x.size(-2)))
-    return x, y_a, y_b, lam
 
 
 def denormalize_coords(coords, coord_stats, coord_norm):
@@ -214,126 +160,56 @@ def build_scheduler(optimizer, scheduler_name, warmup_steps, total_steps):
     raise ValueError(f"Unsupported scheduler: {scheduler_name}")
 
 
-def train_region(
-    model,
-    train_loader,
-    val_loader,
-    device,
-    epochs,
-    lr,
-    weight_decay,
-    amp,
-    optimizer_name,
-    mixup_alpha,
-    cutmix_alpha,
-    mixup_prob,
-    focal_gamma,
-    hard_mining_ratio,
-    freeze_epochs,
-    scheduler_name,
-    warmup_steps,
-    save_best_cb,
-    accum_steps,
+def compute_regression_loss(
+    preds,
+    targets,
+    coord_stats,
+    coord_norm,
+    coord_mode,
+    loss_name,
+    smooth_beta,
+    huber_delta_m,
+    margin_m,
+    margin_weight,
+    return_dist=False,
 ):
-    criterion = FocalLoss(gamma=focal_gamma, reduction="none")
-    optimizer = get_optimizer(optimizer_name, model.parameters(), lr, weight_decay)
-    total_steps = math.ceil(epochs * len(train_loader) / max(1, accum_steps))
-    scheduler, per_step = build_scheduler(optimizer, scheduler_name, warmup_steps, total_steps)
-    scaler = torch.amp.GradScaler("cuda", enabled=(amp and device.type == "cuda"))
-    optimizer.zero_grad(set_to_none=True)
-
-    for epoch in range(1, epochs + 1):
-        model.train()
-        if freeze_epochs and epoch <= freeze_epochs and hasattr(model, "freeze_backbone"):
-            model.freeze_backbone()
-        elif freeze_epochs and epoch == freeze_epochs + 1 and hasattr(model, "unfreeze_backbone"):
-            model.unfreeze_backbone()
-
-        running_loss = 0.0
-        running_correct = 0
-        seen = 0
-        bar = tqdm(train_loader, desc=f"Train {epoch}/{epochs}", leave=False)
-        for step_idx, (images, labels, _) in enumerate(bar):
-            images = images.to(device, non_blocking=True)
-            labels = labels.to(device, non_blocking=True)
-
-            apply_mix = random.random() < mixup_prob
-            mix_mode = None
-            if apply_mix and mixup_alpha > 0:
-                images, y_a, y_b, lam = mixup_data(images, labels, mixup_alpha)
-                mix_mode = "mixup"
-            elif apply_mix and cutmix_alpha > 0:
-                images, y_a, y_b, lam = cutmix_data(images, labels, cutmix_alpha)
-                mix_mode = "cutmix"
-
-            with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(amp and device.type == "cuda")):
-                logits = model(images)
-                if mix_mode:
-                    loss = (
-                        lam * criterion(logits, y_a) + (1 - lam) * criterion(logits, y_b)
-                    ).mean()
-                else:
-                    per_sample = criterion(logits, labels)
-                    if hard_mining_ratio < 1.0:
-                        k = max(1, int(per_sample.numel() * hard_mining_ratio))
-                        per_sample, _ = torch.topk(per_sample, k)
-                    loss = per_sample.mean()
-
-            loss_value = loss.item()
-            loss = loss / max(1, accum_steps)
-            scaler.scale(loss).backward()
-            do_step = ((step_idx + 1) % max(1, accum_steps) == 0) or (step_idx + 1 == len(train_loader))
-            if do_step:
-                scaler.step(optimizer)
-                scaler.update()
-                optimizer.zero_grad(set_to_none=True)
-                if scheduler is not None and per_step:
-                    scheduler.step()
-
-            preds = logits.argmax(dim=1)
-            running_correct += (preds == labels).sum().item()
-            bs = images.size(0)
-            running_loss += loss_value * bs
-            seen += bs
-            bar.set_postfix(loss=running_loss / max(seen, 1))
-
-        train_acc = running_correct / max(seen, 1)
-
-        if val_loader is not None:
-            val_loss, val_acc = evaluate_region(model, val_loader, device, amp, criterion)
-            print(
-                f"Epoch {epoch}: train_loss={running_loss / max(seen, 1):.4f} "
-                f"train_acc={train_acc:.4f} val_loss={val_loss:.4f} val_acc={val_acc:.4f}"
-            )
-            if save_best_cb is not None:
-                save_best_cb(val_acc, model)
+    dist = None
+    if loss_name == "mse":
+        base = nn.functional.mse_loss(preds, targets, reduction="mean")
+    elif loss_name == "l1":
+        base = nn.functional.l1_loss(preds, targets, reduction="mean")
+    elif loss_name == "smooth_l1":
+        base = nn.functional.smooth_l1_loss(preds, targets, reduction="mean", beta=smooth_beta)
+    elif loss_name in ("dist_l1", "dist_mse", "dist_huber"):
+        denorm_preds = denormalize_coords(preds, coord_stats, coord_norm)
+        denorm_targets = denormalize_coords(targets, coord_stats, coord_norm)
+        dist = distance_m(denorm_preds, denorm_targets, coord_mode)
+        if loss_name == "dist_l1":
+            base = dist.mean()
+        elif loss_name == "dist_mse":
+            base = (dist ** 2).mean()
         else:
-            print(
-                f"Epoch {epoch}: train_loss={running_loss / max(seen, 1):.4f} train_acc={train_acc:.4f}"
-            )
+            base = nn.functional.smooth_l1_loss(dist, torch.zeros_like(dist), reduction="mean", beta=huber_delta_m)
+    else:
+        raise ValueError(f"Unsupported reg_loss: {loss_name}")
 
-        if scheduler is not None and not per_step:
-            scheduler.step()
+    if margin_weight > 0:
+        if dist is None:
+            denorm_preds = denormalize_coords(preds, coord_stats, coord_norm)
+            denorm_targets = denormalize_coords(targets, coord_stats, coord_norm)
+            dist = distance_m(denorm_preds, denorm_targets, coord_mode)
+        margin = torch.relu(dist - margin_m)
+        base = base + margin_weight * (margin ** 2).mean()
+
+    if return_dist:
+        if dist is None:
+            denorm_preds = denormalize_coords(preds, coord_stats, coord_norm)
+            denorm_targets = denormalize_coords(targets, coord_stats, coord_norm)
+            dist = distance_m(denorm_preds, denorm_targets, coord_mode)
+        return base, dist
+    return base
 
 
-@torch.no_grad()
-def evaluate_region(model, dataloader, device, amp, criterion):
-    model.eval()
-    running_loss = 0.0
-    running_correct = 0
-    seen = 0
-    for images, labels, _ in dataloader:
-        images = images.to(device, non_blocking=True)
-        labels = labels.to(device, non_blocking=True)
-        with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(amp and device.type == "cuda")):
-            logits = model(images)
-            loss = criterion(logits, labels).mean()
-        preds = logits.argmax(dim=1)
-        running_correct += (preds == labels).sum().item()
-        bs = images.size(0)
-        running_loss += loss.item() * bs
-        seen += bs
-    return running_loss / max(seen, 1), running_correct / max(seen, 1)
 
 
 def train_coords(
@@ -354,8 +230,12 @@ def train_coords(
     warmup_steps,
     save_best_cb,
     accum_steps,
+    reg_loss,
+    reg_smooth_beta,
+    reg_huber_delta_m,
+    reg_margin_m,
+    reg_margin_weight,
 ):
-    criterion = nn.MSELoss()
     optimizer = get_optimizer(optimizer_name, model.parameters(), lr, weight_decay)
     total_steps = math.ceil(epochs * len(train_loader) / max(1, accum_steps))
     scheduler, per_step = build_scheduler(optimizer, scheduler_name, warmup_steps, total_steps)
@@ -378,7 +258,18 @@ def train_coords(
 
             with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(amp and device.type == "cuda")):
                 preds = model(images)
-                loss = criterion(preds, coords)
+                loss = compute_regression_loss(
+                    preds,
+                    coords,
+                    coord_stats,
+                    coord_norm,
+                    coord_mode,
+                    reg_loss,
+                    reg_smooth_beta,
+                    reg_huber_delta_m,
+                    reg_margin_m,
+                    reg_margin_weight,
+                )
 
             loss_value = loss.item()
             loss = loss / max(1, accum_steps)
@@ -400,7 +291,18 @@ def train_coords(
             scheduler.step()
         if val_loader is not None:
             val_loss, val_mse, val_dist_m, val_p10, val_p25 = evaluate_coords(
-                model, val_loader, device, amp, coord_stats, coord_norm, coord_mode
+                model,
+                val_loader,
+                device,
+                amp,
+                coord_stats,
+                coord_norm,
+                coord_mode,
+                reg_loss,
+                reg_smooth_beta,
+                reg_huber_delta_m,
+                reg_margin_m,
+                reg_margin_weight,
             )
             print(
                 f"Epoch {epoch}: train_loss={running_loss / max(seen, 1):.6f} "
@@ -433,9 +335,13 @@ def train_multitask(
     warmup_steps,
     save_best_cb,
     accum_steps,
+    reg_loss_name,
+    reg_smooth_beta,
+    reg_huber_delta_m,
+    reg_margin_m,
+    reg_margin_weight,
 ):
     cls_criterion = nn.CrossEntropyLoss()
-    reg_criterion = nn.MSELoss()
     optimizer = get_optimizer(optimizer_name, model.parameters(), lr, weight_decay)
     total_steps = math.ceil(epochs * len(train_loader) / max(1, accum_steps))
     scheduler, per_step = build_scheduler(optimizer, scheduler_name, warmup_steps, total_steps)
@@ -465,7 +371,19 @@ def train_multitask(
             with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(amp and device.type == "cuda")):
                 logits, preds = model(images)
                 cls_loss = cls_criterion(logits, labels)
-                reg_loss = reg_criterion(preds, coords)
+                reg_loss, dist = compute_regression_loss(
+                    preds,
+                    coords,
+                    coord_stats,
+                    coord_norm,
+                    coord_mode,
+                    reg_loss_name,
+                    reg_smooth_beta,
+                    reg_huber_delta_m,
+                    reg_margin_m,
+                    reg_margin_weight,
+                    return_dist=True,
+                )
                 loss = cls_weight * cls_loss + coord_weight * reg_loss
 
             loss_value_cls = cls_loss.item()
@@ -483,11 +401,7 @@ def train_multitask(
 
             preds_cls = logits.argmax(dim=1)
             acc = (preds_cls == labels).sum().item()
-            dist = distance_m(
-                denormalize_coords(preds, coord_stats, coord_norm),
-                denormalize_coords(coords, coord_stats, coord_norm),
-                coord_mode,
-            )
+            # dist is in meters when return_dist=True
 
             bs = images.size(0)
             running_cls_loss += loss_value_cls * bs
@@ -514,7 +428,19 @@ def train_multitask(
                 val_p10,
                 val_p25,
             ) = evaluate_multitask(
-                model, val_loader, device, amp, coord_stats, coord_norm, coord_mode, cls_criterion
+                model,
+                val_loader,
+                device,
+                amp,
+                coord_stats,
+                coord_norm,
+                coord_mode,
+                cls_criterion,
+                reg_loss_name,
+                reg_smooth_beta,
+                reg_huber_delta_m,
+                reg_margin_m,
+                reg_margin_weight,
             )
             print(
                 f"Epoch {epoch}: cls_loss={running_cls_loss / max(seen,1):.4f} "
@@ -524,7 +450,7 @@ def train_multitask(
                 f"val_p10={val_p10:.3f} val_p25={val_p25:.3f}"
             )
             if save_best_cb is not None:
-                save_best_cb(val_dist, model)
+                save_best_cb(-val_dist, model)
         else:
             print(
                 f"Epoch {epoch}: cls_loss={running_cls_loss / max(seen,1):.4f} "
@@ -535,7 +461,20 @@ def train_multitask(
                 f"train_p25={running_p25 / max(seen,1):.3f}"
             )
 @torch.no_grad()
-def evaluate_coords(model, dataloader, device, amp, coord_stats, coord_norm, coord_mode):
+def evaluate_coords(
+    model,
+    dataloader,
+    device,
+    amp,
+    coord_stats,
+    coord_norm,
+    coord_mode,
+    reg_loss,
+    reg_smooth_beta,
+    reg_huber_delta_m,
+    reg_margin_m,
+    reg_margin_weight,
+):
     model.eval()
     running_loss = 0.0
     running_mse = 0.0
@@ -548,7 +487,18 @@ def evaluate_coords(model, dataloader, device, amp, coord_stats, coord_norm, coo
         coords = coords.to(device, non_blocking=True)
         with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(amp and device.type == "cuda")):
             preds = model(images)
-            loss = nn.functional.mse_loss(preds, coords, reduction="mean")
+            loss = compute_regression_loss(
+                preds,
+                coords,
+                coord_stats,
+                coord_norm,
+                coord_mode,
+                reg_loss,
+                reg_smooth_beta,
+                reg_huber_delta_m,
+                reg_margin_m,
+                reg_margin_weight,
+            )
         denorm_preds = denormalize_coords(preds, coord_stats, coord_norm)
         denorm_targets = denormalize_coords(coords, coord_stats, coord_norm)
         mse = nn.functional.mse_loss(denorm_preds, denorm_targets, reduction="mean")
@@ -574,7 +524,21 @@ def evaluate_coords(model, dataloader, device, amp, coord_stats, coord_norm, coo
 
 
 @torch.no_grad()
-def evaluate_multitask(model, dataloader, device, amp, coord_stats, coord_norm, coord_mode, cls_criterion):
+def evaluate_multitask(
+    model,
+    dataloader,
+    device,
+    amp,
+    coord_stats,
+    coord_norm,
+    coord_mode,
+    cls_criterion,
+    reg_loss_name,
+    reg_smooth_beta,
+    reg_huber_delta_m,
+    reg_margin_m,
+    reg_margin_weight,
+):
     model.eval()
     running_cls_loss = 0.0
     running_reg_loss = 0.0
@@ -590,7 +554,18 @@ def evaluate_multitask(model, dataloader, device, amp, coord_stats, coord_norm, 
         with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(amp and device.type == "cuda")):
             logits, preds = model(images)
             cls_loss = cls_criterion(logits, labels)
-            reg_loss = nn.functional.mse_loss(preds, coords, reduction="mean")
+            reg_loss = compute_regression_loss(
+                preds,
+                coords,
+                coord_stats,
+                coord_norm,
+                coord_mode,
+                reg_loss_name,
+                reg_smooth_beta,
+                reg_huber_delta_m,
+                reg_margin_m,
+                reg_margin_weight,
+            )
 
         preds_cls = logits.argmax(dim=1)
         acc = (preds_cls == labels).float().mean()
@@ -624,7 +599,7 @@ def main():
     cfg_args, remaining = config_parser.parse_known_args()
 
     parser = argparse.ArgumentParser(parents=[config_parser])
-    parser.add_argument("--task", choices=["coords", "region", "multitask"], required=False)
+    parser.add_argument("--task", choices=["coords", "multitask"], required=False)
     parser.add_argument("--csv-path", default="data/metadata1.csv")
     parser.add_argument("--img-dir", default="data/images")
     parser.add_argument("--batch-size", type=int, default=16)
@@ -641,11 +616,6 @@ def main():
     parser.add_argument("--randaugment", action="store_true")
     parser.add_argument("--ra-n", type=int, default=2)
     parser.add_argument("--ra-m", type=int, default=9)
-    parser.add_argument("--mixup-alpha", type=float, default=0.2)
-    parser.add_argument("--cutmix-alpha", type=float, default=1.0)
-    parser.add_argument("--mixup-prob", type=float, default=0.5)
-    parser.add_argument("--focal-gamma", type=float, default=2.0)
-    parser.add_argument("--hard-mining-ratio", type=float, default=1.0)
     parser.add_argument("--coord-mode", choices=["latlon", "utm"], default="latlon")
     parser.add_argument("--coord-norm", choices=["standard", "center", "none"], default="standard")
     parser.add_argument("--dinov2-name", default="vit_base_patch14_dinov2.lvd142m")
@@ -655,7 +625,15 @@ def main():
     parser.add_argument("--scheduler", choices=["none", "cosine", "cosine_warmup"], default="cosine_warmup")
     parser.add_argument("--warmup-steps", type=int, default=100)
     parser.add_argument("--accum-steps", type=int, default=1, help="Gradient accumulation steps.")
-    parser.add_argument("--cls-model-name", default="swin_tiny_patch4_window7_224", help="Swin backbone name.")
+    parser.add_argument(
+        "--reg-loss",
+        choices=["mse", "l1", "smooth_l1", "dist_l1", "dist_mse", "dist_huber"],
+        default="mse",
+    )
+    parser.add_argument("--reg-smooth-beta", type=float, default=1.0)
+    parser.add_argument("--reg-huber-delta-m", type=float, default=10.0)
+    parser.add_argument("--reg-margin-m", type=float, default=10.0)
+    parser.add_argument("--reg-margin-weight", type=float, default=0.0)
 
     if cfg_args.config:
         cfg = load_config(cfg_args.config)
@@ -664,7 +642,7 @@ def main():
     args = parser.parse_args(remaining)
 
     if args.task is None:
-        parser.error("--task is required (coords, region, multitask)")
+        parser.error("--task is required (coords, multitask)")
 
     seed_everything(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -755,6 +733,11 @@ def main():
                 "coord_stats": coord_stats,
                 "coord_norm": args.coord_norm,
                 "coord_mode": args.coord_mode,
+                "reg_loss": args.reg_loss,
+                "reg_smooth_beta": args.reg_smooth_beta,
+                "reg_huber_delta_m": args.reg_huber_delta_m,
+                "reg_margin_m": args.reg_margin_m,
+                "reg_margin_weight": args.reg_margin_weight,
             },
             args.best_path,
         )
@@ -776,6 +759,11 @@ def main():
             args.warmup_steps,
             save_best,
             args.accum_steps,
+            args.reg_loss,
+            args.reg_smooth_beta,
+            args.reg_huber_delta_m,
+            args.reg_margin_m,
+            args.reg_margin_weight,
         )
         save_payload = {
             "task": "coords",
@@ -783,92 +771,73 @@ def main():
             "coord_stats": coord_stats,
             "coord_norm": args.coord_norm,
             "coord_mode": args.coord_mode,
+            "reg_loss": args.reg_loss,
+            "reg_smooth_beta": args.reg_smooth_beta,
+            "reg_huber_delta_m": args.reg_huber_delta_m,
+            "reg_margin_m": args.reg_margin_m,
+            "reg_margin_weight": args.reg_margin_weight,
         }
     else:
         num_classes = int(df["sector_label"].nunique())
-        if args.task == "region":
-            model = SwinRegionClassifier(
-                num_classes=num_classes,
-                pretrained=args.pretrained,
-                model_name=args.cls_model_name,
-            )
-            model.to(device)
-            save_best = make_best_saver({"task": "region", "num_classes": num_classes}, args.best_path)
-            train_region(
-                model,
-                train_loader,
-                val_loader,
-                device,
-                args.epochs,
-                args.lr,
-                args.weight_decay,
-                args.amp,
-                args.optimizer,
-                args.mixup_alpha,
-                args.cutmix_alpha,
-                args.mixup_prob,
-                args.focal_gamma,
-                args.hard_mining_ratio,
-                args.freeze_epochs,
-                args.scheduler,
-                args.warmup_steps,
-                save_best,
-                args.accum_steps,
-            )
-            save_payload = {
-                "task": "region",
-                "model_state": model.state_dict(),
-                "num_classes": num_classes,
-                "cls_model_name": args.cls_model_name,
-            }
-        else:  # multitask
-            model = MultiTaskModel(
-                num_classes=num_classes,
-                coord_model_name=args.dinov2_name,
-                pretrained=args.pretrained,
-                cls_model_name=args.cls_model_name,
-            ).to(device)
-            save_best = make_best_saver(
-                {
-                    "task": "multitask",
-                    "num_classes": num_classes,
-                    "coord_stats": coord_stats,
-                    "coord_norm": args.coord_norm,
-                    "coord_mode": args.coord_mode,
-                    "cls_model_name": args.cls_model_name,
-                },
-                args.best_path,
-            )
-            train_multitask(
-                model,
-                train_loader,
-                val_loader,
-                device,
-                args.epochs,
-                args.lr,
-                args.weight_decay,
-                args.amp,
-                args.optimizer,
-                coord_stats,
-                args.coord_norm,
-                args.coord_mode,
-                args.cls_weight,
-                args.coord_weight,
-                args.freeze_epochs,
-                args.scheduler,
-                args.warmup_steps,
-                save_best,
-                args.accum_steps,
-            )
-            save_payload = {
+        model = SharedDinoMultiTask(
+            num_classes=num_classes,
+            coord_model_name=args.dinov2_name,
+            pretrained=args.pretrained,
+        ).to(device)
+        save_best = make_best_saver(
+            {
                 "task": "multitask",
-                "model_state": model.state_dict(),
                 "num_classes": num_classes,
                 "coord_stats": coord_stats,
                 "coord_norm": args.coord_norm,
                 "coord_mode": args.coord_mode,
-                "cls_model_name": args.cls_model_name,
-            }
+                "reg_loss": args.reg_loss,
+                "reg_smooth_beta": args.reg_smooth_beta,
+                "reg_huber_delta_m": args.reg_huber_delta_m,
+                "reg_margin_m": args.reg_margin_m,
+                "reg_margin_weight": args.reg_margin_weight,
+            },
+            args.best_path,
+        )
+        train_multitask(
+            model,
+            train_loader,
+            val_loader,
+            device,
+            args.epochs,
+            args.lr,
+            args.weight_decay,
+            args.amp,
+            args.optimizer,
+            coord_stats,
+            args.coord_norm,
+            args.coord_mode,
+            args.cls_weight,
+            args.coord_weight,
+            args.freeze_epochs,
+            args.scheduler,
+            args.warmup_steps,
+            save_best,
+            args.accum_steps,
+            args.reg_loss,
+            args.reg_smooth_beta,
+            args.reg_huber_delta_m,
+            args.reg_margin_m,
+            args.reg_margin_weight,
+        )
+        save_payload = {
+            "task": "multitask",
+            "model_state": model.state_dict(),
+            "num_classes": num_classes,
+            "coord_stats": coord_stats,
+            "coord_norm": args.coord_norm,
+            "coord_mode": args.coord_mode,
+            "reg_loss": args.reg_loss,
+            "reg_smooth_beta": args.reg_smooth_beta,
+            "reg_huber_delta_m": args.reg_huber_delta_m,
+            "reg_margin_m": args.reg_margin_m,
+            "reg_margin_weight": args.reg_margin_weight,
+        }
 
     torch.save(save_payload, args.save_path)
     print(f"Saved: {args.save_path}")

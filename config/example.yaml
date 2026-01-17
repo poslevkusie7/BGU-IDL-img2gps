@@ -15,11 +15,6 @@ freeze_epochs: 0
 randaugment: false
 ra_n: 2
 ra_m: 9
-mixup_alpha: 0.0
-cutmix_alpha: 0.0
-mixup_prob: 0.0
-focal_gamma: 2.0
-hard_mining_ratio: 1.0
 coord_mode: latlon
 coord_norm: standard
 dinov2_name: vit_small_patch14_dinov2.lvd142m
@@ -29,4 +24,8 @@ coord_weight: 1.0
 scheduler: cosine_warmup   # options: none, cosine, cosine_warmup
 warmup_steps: 100
 accum_steps: 1
-cls_model_name: swin_tiny_patch4_window7_224   # swap to swin_tiny_patch4_window7_224 to save memory
+reg_loss: mse            # mse, l1, smooth_l1, dist_l1, dist_mse, dist_huber
+reg_smooth_beta: 1.0
+reg_huber_delta_m: 10.0
+reg_margin_m: 10.0
+reg_margin_weight: 0.0

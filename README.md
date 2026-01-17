@@ -4,7 +4,7 @@ Image-to-GPS regression on university campus: training and evaluating models tha
 ## Requirements
 - Python 3.9+
 - PyTorch, torchvision
-- timm (for DINOv2 and Swin backbones)
+- timm (for DINOv2/ViT backbones)
 - pandas, pillow
 - utm (only if you use `--coord-mode utm`)
 
@@ -25,7 +25,7 @@ CLI (regression example):
 python -m src.train --task coords --csv-path data/metadata1.csv --img-dir data/images --pretrained --amp --coord-mode utm --coord-norm standard --batch-size 16
 ```
 
-Multitask (Swin classification + DINOv2 regression) via YAML:
+Multitask (shared DINOv2 backbone with classification + regression heads) via YAML:
 ```
 python -m src.train --config config/example.yaml
 ```

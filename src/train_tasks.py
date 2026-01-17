@@ -360,7 +360,7 @@ def main():
     parser.add_argument("--task", choices=["coords", "region"], required=True)
     parser.add_argument("--csv-path", default="data/metadata1.csv")
     parser.add_argument("--img-dir", default="data/images")
-    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)

@@ -154,6 +154,25 @@ def denormalize_coords(coords, coord_stats, coord_norm):
     return coords
 
 
+def haversine_m(latlon_pred, latlon_true):
+    # lat/lon in degrees -> meters
+    lat1 = torch.deg2rad(latlon_pred[:, 0])
+    lon1 = torch.deg2rad(latlon_pred[:, 1])
+    lat2 = torch.deg2rad(latlon_true[:, 0])
+    lon2 = torch.deg2rad(latlon_true[:, 1])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = torch.sin(dlat / 2) ** 2 + torch.cos(lat1) * torch.cos(lat2) * torch.sin(dlon / 2) ** 2
+    c = 2 * torch.asin(torch.sqrt(a.clamp(min=0, max=1)))
+    return 6371000.0 * c
+
+
+def distance_m(preds, targets, coord_mode):
+    if coord_mode == "utm":
+        return torch.norm(preds - targets, dim=1)
+    return haversine_m(preds, targets)
+
+
 def get_optimizer(opt_name, params, lr, weight_decay):
     if opt_name == "adamw":
         return optim.AdamW(params, lr=lr, weight_decay=weight_decay)
@@ -283,6 +302,7 @@ def train_coords(
     optimizer_name,
     coord_stats,
     coord_norm,
+    coord_mode,
     freeze_epochs,
 ):
     criterion = nn.MSELoss()
@@ -320,22 +340,26 @@ def train_coords(
 
         scheduler.step()
         if val_loader is not None:
-            val_loss, val_mse = evaluate_coords(
-                model, val_loader, device, amp, coord_stats, coord_norm
+            val_loss, val_mse, val_dist_m, val_p10, val_p25 = evaluate_coords(
+                model, val_loader, device, amp, coord_stats, coord_norm, coord_mode
             )
             print(
                 f"Epoch {epoch}: train_loss={running_loss / max(seen, 1):.6f} "
-                f"val_loss={val_loss:.6f} val_mse={val_mse:.6f}"
+                f"val_loss={val_loss:.6f} val_mse={val_mse:.6f} "
+                f"val_dist_m={val_dist_m:.2f} p10m={val_p10:.3f} p25m={val_p25:.3f}"
             )
         else:
             print(f"Epoch {epoch}: train_loss={running_loss / max(seen, 1):.6f}")
 
 
 @torch.no_grad()
-def evaluate_coords(model, dataloader, device, amp, coord_stats, coord_norm):
+def evaluate_coords(model, dataloader, device, amp, coord_stats, coord_norm, coord_mode):
     model.eval()
     running_loss = 0.0
     running_mse = 0.0
+    running_dist = 0.0
+    running_p10 = 0.0
+    running_p25 = 0.0
     seen = 0
     for images, _, coords in dataloader:
         images = images.to(device, non_blocking=True)
@@ -346,13 +370,25 @@ def evaluate_coords(model, dataloader, device, amp, coord_stats, coord_norm):
         denorm_preds = denormalize_coords(preds, coord_stats, coord_norm)
         denorm_targets = denormalize_coords(coords, coord_stats, coord_norm)
         mse = nn.functional.mse_loss(denorm_preds, denorm_targets, reduction="mean")
+        dist = distance_m(denorm_preds, denorm_targets, coord_mode)
+        p10 = (dist <= 10.0).float().mean()
+        p25 = (dist <= 25.0).float().mean()
 
         bs = images.size(0)
         running_loss += loss.item() * bs
         running_mse += mse.item() * bs
+        running_dist += dist.mean().item() * bs
+        running_p10 += p10.item() * bs
+        running_p25 += p25.item() * bs
         seen += bs
 
-    return running_loss / max(seen, 1), running_mse / max(seen, 1)
+    return (
+        running_loss / max(seen, 1),
+        running_mse / max(seen, 1),
+        running_dist / max(seen, 1),
+        running_p10 / max(seen, 1),
+        running_p25 / max(seen, 1),
+    )
 
 
 def main():
@@ -459,6 +495,7 @@ def main():
             args.optimizer,
             coord_stats,
             args.coord_norm,
+            args.coord_mode,
             args.freeze_epochs,
         )
     else:

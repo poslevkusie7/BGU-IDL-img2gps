@@ -1,11 +1,26 @@
 # BGU-IDL-img2gps
 Image-to-GPS regression on university campus: training and evaluating models that map images to precise geocoordinates.
 
+## Requirements
+- Python 3.9+
+- PyTorch, torchvision
+- timm (for DINOv2 and Swin backbones)
+- pandas, pillow
+- utm (only if you use `--coord-mode utm`)
+
 ## Data
 CSV must include: `image_id`, `sector_label`, `lat`, `lon`.
 
-## Training (new models)
-Coordinate regression (DINOv2 ViT-B/14 + regression head):
+Expected layout:
+```
+data/
+  metadata1.csv
+  images/
+    *.jpg
+```
+
+## Training
+Coordinate regression (DINOv2 ViT-B/14 + regression head): in the root of the project
 ```bash
 python -m src.train_tasks --task coords --csv-path data/metadata1.csv --img-dir data/images --pretrained --amp
 ```
@@ -15,6 +30,8 @@ Region classification (Swin Base):
 python -m src.train_tasks --task region --csv-path data/metadata1.csv --img-dir data/images --pretrained --amp --randaugment
 ```
 
-Notes:
+## Notes
 - `sector_label` is auto-factorized to `0..N-1`.
 - `--coord-mode latlon` + `--coord-norm standard` enables statistical normalization for regression.
+- DINOv2 uses 518x518 inputs; reduce `--batch-size` if you see CUDA OOM.
+- For fewer HF download warnings, set `HF_TOKEN` before the first run.

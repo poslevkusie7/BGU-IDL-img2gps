@@ -64,20 +64,13 @@ class Lookahead(optim.Optimizer):
         return loss
 
 
-def build_transforms(
-    mode="train",
-    img_size=518,
-    randaugment=False,
-    ra_n=2,
-    ra_m=9,
-):
+def build_transforms(mode="train", img_size=518, randaugment=False, ra_n=2, ra_m=9):
     mean = [0.485, 0.456, 0.406]
     std = [0.229, 0.224, 0.225]
 
     if mode == "train":
         ops = [
             transforms.RandomResizedCrop(img_size, scale=(0.8, 1.0), ratio=(0.9, 1.1)),
-            transforms.RandomHorizontalFlip(p=0.5),
         ]
         if randaugment:
             ops.append(transforms.RandAugment(num_ops=ra_n, magnitude=ra_m))
@@ -85,17 +78,15 @@ def build_transforms(
             transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.05),
             transforms.RandomGrayscale(p=0.1),
             transforms.GaussianBlur(kernel_size=(5, 5), sigma=(0.1, 5)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=mean, std=std),
         ]
-        return transforms.Compose(ops)
-    return transforms.Compose(
-        [
-            transforms.Resize((img_size, img_size)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=mean, std=std),
-        ]
-    )
+    else:
+        ops = [transforms.Resize((img_size, img_size))]
+
+    ops += [
+        transforms.ToTensor(),
+        transforms.Normalize(mean=mean, std=std),
+    ]
+    return transforms.Compose(ops)
 
 
 
@@ -167,8 +158,6 @@ def compute_regression_loss(
     coord_norm,
     coord_mode,
     loss_name,
-    smooth_beta,
-    huber_delta_m,
     margin_m,
     margin_weight,
     return_dist=False,
@@ -176,20 +165,13 @@ def compute_regression_loss(
     dist = None
     if loss_name == "mse":
         base = nn.functional.mse_loss(preds, targets, reduction="mean")
-    elif loss_name == "l1":
-        base = nn.functional.l1_loss(preds, targets, reduction="mean")
-    elif loss_name == "smooth_l1":
-        base = nn.functional.smooth_l1_loss(preds, targets, reduction="mean", beta=smooth_beta)
-    elif loss_name in ("dist_l1", "dist_mse", "dist_huber"):
+    elif loss_name == "haversine":
+        if coord_mode != "latlon":
+            raise ValueError("haversine loss requires coord_mode='latlon'.")
         denorm_preds = denormalize_coords(preds, coord_stats, coord_norm)
         denorm_targets = denormalize_coords(targets, coord_stats, coord_norm)
-        dist = distance_m(denorm_preds, denorm_targets, coord_mode)
-        if loss_name == "dist_l1":
-            base = dist.mean()
-        elif loss_name == "dist_mse":
-            base = (dist ** 2).mean()
-        else:
-            base = nn.functional.smooth_l1_loss(dist, torch.zeros_like(dist), reduction="mean", beta=huber_delta_m)
+        dist = haversine_m(denorm_preds, denorm_targets)
+        base = dist.mean()
     else:
         raise ValueError(f"Unsupported reg_loss: {loss_name}")
 
@@ -231,8 +213,6 @@ def train_coords(
     save_best_cb,
     accum_steps,
     reg_loss,
-    reg_smooth_beta,
-    reg_huber_delta_m,
     reg_margin_m,
     reg_margin_weight,
 ):
@@ -265,8 +245,6 @@ def train_coords(
                     coord_norm,
                     coord_mode,
                     reg_loss,
-                    reg_smooth_beta,
-                    reg_huber_delta_m,
                     reg_margin_m,
                     reg_margin_weight,
                 )
@@ -299,8 +277,6 @@ def train_coords(
                 coord_norm,
                 coord_mode,
                 reg_loss,
-                reg_smooth_beta,
-                reg_huber_delta_m,
                 reg_margin_m,
                 reg_margin_weight,
             )
@@ -336,8 +312,6 @@ def train_multitask(
     save_best_cb,
     accum_steps,
     reg_loss_name,
-    reg_smooth_beta,
-    reg_huber_delta_m,
     reg_margin_m,
     reg_margin_weight,
 ):
@@ -378,8 +352,6 @@ def train_multitask(
                     coord_norm,
                     coord_mode,
                     reg_loss_name,
-                    reg_smooth_beta,
-                    reg_huber_delta_m,
                     reg_margin_m,
                     reg_margin_weight,
                     return_dist=True,
@@ -437,8 +409,6 @@ def train_multitask(
                 coord_mode,
                 cls_criterion,
                 reg_loss_name,
-                reg_smooth_beta,
-                reg_huber_delta_m,
                 reg_margin_m,
                 reg_margin_weight,
             )
@@ -470,8 +440,6 @@ def evaluate_coords(
     coord_norm,
     coord_mode,
     reg_loss,
-    reg_smooth_beta,
-    reg_huber_delta_m,
     reg_margin_m,
     reg_margin_weight,
 ):
@@ -494,8 +462,6 @@ def evaluate_coords(
                 coord_norm,
                 coord_mode,
                 reg_loss,
-                reg_smooth_beta,
-                reg_huber_delta_m,
                 reg_margin_m,
                 reg_margin_weight,
             )
@@ -534,8 +500,6 @@ def evaluate_multitask(
     coord_mode,
     cls_criterion,
     reg_loss_name,
-    reg_smooth_beta,
-    reg_huber_delta_m,
     reg_margin_m,
     reg_margin_weight,
 ):
@@ -561,8 +525,6 @@ def evaluate_multitask(
                 coord_norm,
                 coord_mode,
                 reg_loss_name,
-                reg_smooth_beta,
-                reg_huber_delta_m,
                 reg_margin_m,
                 reg_margin_weight,
             )
@@ -627,11 +589,9 @@ def main():
     parser.add_argument("--accum-steps", type=int, default=1, help="Gradient accumulation steps.")
     parser.add_argument(
         "--reg-loss",
-        choices=["mse", "l1", "smooth_l1", "dist_l1", "dist_mse", "dist_huber"],
+        choices=["mse", "haversine"],
         default="mse",
     )
-    parser.add_argument("--reg-smooth-beta", type=float, default=1.0)
-    parser.add_argument("--reg-huber-delta-m", type=float, default=10.0)
     parser.add_argument("--reg-margin-m", type=float, default=10.0)
     parser.add_argument("--reg-margin-weight", type=float, default=0.0)
 
@@ -734,8 +694,6 @@ def main():
                 "coord_norm": args.coord_norm,
                 "coord_mode": args.coord_mode,
                 "reg_loss": args.reg_loss,
-                "reg_smooth_beta": args.reg_smooth_beta,
-                "reg_huber_delta_m": args.reg_huber_delta_m,
                 "reg_margin_m": args.reg_margin_m,
                 "reg_margin_weight": args.reg_margin_weight,
             },
@@ -760,8 +718,6 @@ def main():
             save_best,
             args.accum_steps,
             args.reg_loss,
-            args.reg_smooth_beta,
-            args.reg_huber_delta_m,
             args.reg_margin_m,
             args.reg_margin_weight,
         )
@@ -772,8 +728,6 @@ def main():
             "coord_norm": args.coord_norm,
             "coord_mode": args.coord_mode,
             "reg_loss": args.reg_loss,
-            "reg_smooth_beta": args.reg_smooth_beta,
-            "reg_huber_delta_m": args.reg_huber_delta_m,
             "reg_margin_m": args.reg_margin_m,
             "reg_margin_weight": args.reg_margin_weight,
         }
@@ -792,8 +746,6 @@ def main():
                 "coord_norm": args.coord_norm,
                 "coord_mode": args.coord_mode,
                 "reg_loss": args.reg_loss,
-                "reg_smooth_beta": args.reg_smooth_beta,
-                "reg_huber_delta_m": args.reg_huber_delta_m,
                 "reg_margin_m": args.reg_margin_m,
                 "reg_margin_weight": args.reg_margin_weight,
             },
@@ -820,8 +772,6 @@ def main():
             save_best,
             args.accum_steps,
             args.reg_loss,
-            args.reg_smooth_beta,
-            args.reg_huber_delta_m,
             args.reg_margin_m,
             args.reg_margin_weight,
         )
@@ -833,8 +783,6 @@ def main():
             "coord_norm": args.coord_norm,
             "coord_mode": args.coord_mode,
             "reg_loss": args.reg_loss,
-            "reg_smooth_beta": args.reg_smooth_beta,
-            "reg_huber_delta_m": args.reg_huber_delta_m,
             "reg_margin_m": args.reg_margin_m,
             "reg_margin_weight": args.reg_margin_weight,
         }

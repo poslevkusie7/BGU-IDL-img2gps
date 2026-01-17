@@ -519,16 +519,12 @@ def train_multitask(
             print(
                 f"Epoch {epoch}: cls_loss={running_cls_loss / max(seen,1):.4f} "
                 f"reg_loss={running_reg_loss / max(seen,1):.4f} "
-                f"train_acc={running_cls_acc / max(seen,1):.4f} "
-                f"train_dist_m={running_dist / max(seen,1):.2f} "
-                f"train_p10={running_p10 / max(seen,1):.3f} "
-                f"train_p25={running_p25 / max(seen,1):.3f} "
                 f"val_cls_loss={val_cls_loss:.4f} val_reg_loss={val_reg_loss:.4f} "
                 f"val_acc={val_cls_acc:.4f} val_dist_m={val_dist:.2f} "
                 f"val_p10={val_p10:.3f} val_p25={val_p25:.3f}"
             )
             if save_best_cb is not None:
-                save_best_cb(-val_dist, model)
+                save_best_cb(val_dist, model)
         else:
             print(
                 f"Epoch {epoch}: cls_loss={running_cls_loss / max(seen,1):.4f} "
@@ -659,7 +655,7 @@ def main():
     parser.add_argument("--scheduler", choices=["none", "cosine", "cosine_warmup"], default="cosine_warmup")
     parser.add_argument("--warmup-steps", type=int, default=100)
     parser.add_argument("--accum-steps", type=int, default=1, help="Gradient accumulation steps.")
-    parser.add_argument("--cls-model-name", default="swin_base_patch4_window7_224", help="Swin backbone name.")
+    parser.add_argument("--cls-model-name", default="swin_tiny_patch4_window7_224", help="Swin backbone name.")
 
     if cfg_args.config:
         cfg = load_config(cfg_args.config)

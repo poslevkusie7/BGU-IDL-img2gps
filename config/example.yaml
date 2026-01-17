@@ -22,11 +22,11 @@ focal_gamma: 2.0
 hard_mining_ratio: 1.0
 coord_mode: latlon
 coord_norm: standard
-dinov2_name: vit_base_patch14_dinov2.lvd142m
+dinov2_name: vit_small_patch14_dinov2.lvd142m
 pretrained: true
 cls_weight: 1.0
 coord_weight: 1.0
 scheduler: cosine_warmup   # options: none, cosine, cosine_warmup
 warmup_steps: 100
 accum_steps: 1
-cls_model_name: swin_base_patch4_window7_224   # swap to swin_tiny_patch4_window7_224 to save memory
+cls_model_name: swin_tiny_patch4_window7_224   # swap to swin_tiny_patch4_window7_224 to save memory

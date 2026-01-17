@@ -3,15 +3,16 @@ import os
 import numpy as np
 from PIL import Image
 import torch
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
+from torch.utils.data import Dataset
 
 try:
     import utm
 except ImportError:  # Optional when using lat/lon directly.
     utm = None
 
+
 def _coords_from_df(dataframe, coord_mode):
+    """Convert lat/lon to either UTM meters or keep raw lat/lon."""
     lats = dataframe["lat"].values
     lons = dataframe["lon"].values
 
@@ -29,6 +30,7 @@ def _coords_from_df(dataframe, coord_mode):
 
 
 def compute_coord_stats(dataframe, coord_mode="latlon"):
+    """Compute mean/std for coordinate normalization."""
     coords = _coords_from_df(dataframe, coord_mode=coord_mode)
     mean = coords.mean(axis=0)
     std = coords.std(axis=0)
@@ -37,6 +39,10 @@ def compute_coord_stats(dataframe, coord_mode="latlon"):
 
 
 class LocalizationDataset(Dataset):
+    """
+    Returns: image tensor, sector label (long), normalized coords (float32).
+    """
+
     def __init__(
         self,
         dataframe,
@@ -46,15 +52,6 @@ class LocalizationDataset(Dataset):
         coord_norm="center",
         coord_stats=None,
     ):
-        """
-        Args:
-            dataframe (pd.DataFrame): Columns ['image_id', 'sector_label', 'lat', 'lon']
-            img_dir (str): Path to image folder.
-            transform (callable, optional): PyTorch transforms.
-            coord_mode (str): 'utm' or 'latlon'.
-            coord_norm (str): 'center', 'standard', or 'none'.
-            coord_stats (dict, optional): {'mean': ..., 'std': ...} from train data.
-        """
         self.img_dir = img_dir
         self.transform = transform
 
@@ -85,84 +82,14 @@ class LocalizationDataset(Dataset):
         img_name = self.image_ids[idx]
         img_path = os.path.join(self.img_dir, img_name)
 
-        try:
-            image = Image.open(img_path).convert("RGB")
-        except (OSError, FileNotFoundError):
-            image = Image.new("RGB", (224, 224))
+        image = Image.open(img_path).convert("RGB")
 
         if self.transform:
             image = self.transform(image)
 
         label = torch.tensor(self.labels[idx], dtype=torch.long)
-        
-        # 3. Get GPS (Head 2)
         gps_target = torch.tensor(self.coords[idx], dtype=torch.float32)
-        
         return image, label, gps_target
-
-    def get_reference_origin(self):
-        """Helper to recover original coordinates if needed."""
-        return self.coord_stats["mean"]
 
     def get_coord_stats(self):
         return self.coord_stats
-    
-# --- 2. Augmentation / Transform Logic ---
-def get_transforms(mode="train", img_size=224):
-    mean = [0.485, 0.456, 0.406]
-    std  = [0.229, 0.224, 0.225]
-
-    if mode == "train":
-        # Keep this mild; retrieval systems hate heavy stochastic transforms
-        return transforms.Compose([
-            transforms.Resize(256),
-            # optional: add mild crop if you want
-            # transforms.RandomResizedCrop(img_size, scale=(0.8, 1.0)),
-            transforms.CenterCrop(img_size),  # stable by default
-            transforms.ToTensor(),
-            transforms.Normalize(mean=mean, std=std),
-        ])
-
-    # val / test / db: deterministic
-    return transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(img_size),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=mean, std=std),
-    ])
-
-
-# --- 3. The Helper Function to Create Loaders ---
-def get_dataloader(
-    df,
-    img_dir,
-    batch_size=32,
-    mode="train",
-    num_workers=4,
-    pin_memory=True,
-    coord_mode="utm",
-    coord_norm="center",
-    coord_stats=None,
-):
-    transform = get_transforms(mode=mode)
-    dataset = LocalizationDataset(
-        df,
-        img_dir,
-        transform=transform,
-        coord_mode=coord_mode,
-        coord_norm=coord_norm,
-        coord_stats=coord_stats,
-    )
-    should_shuffle = (mode == 'train')
-
-    kwargs = dict(
-        batch_size=batch_size,
-        shuffle=shuffle,
-        drop_last=drop_last,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-    )
-    if num_workers > 0:
-        kwargs.update(dict(persistent_workers=True, prefetch_factor=4))
-
-    return DataLoader(dataset, **kwargs)

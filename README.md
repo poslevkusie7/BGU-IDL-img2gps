@@ -22,7 +22,7 @@ data/
 ## Training
 In the root of the project: 
 ```
-python -m src.train_tasks --task coords --csv-path data/metadata1.csv --img-dir data/images --pretrained --amp --coord-mode utm --coord-norm standard --batch-size 16
+python -m src.train --task coords --csv-path data/metadata1.csv --img-dir data/images --pretrained --amp --coord-mode utm --coord-norm standard --batch-size 16
 
 ```
 

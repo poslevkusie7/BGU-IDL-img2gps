@@ -1,0 +1,91 @@
+Epoch 1: cls_loss=1.3573 reg_loss=0.8959 val_cls_loss=0.9414 val_reg_loss=0.6753 val_acc=0.5660 val_dist_m=56.41 val_p10=0.038 val_p25=0.230
+Saved best checkpoint to runs/multitask_best.pt (metric=-56.4079)
+Epoch 2: cls_loss=0.9234 reg_loss=0.6642 val_cls_loss=0.6839 val_reg_loss=0.5774 val_acc=0.7234 val_dist_m=51.16 val_p10=0.047 val_p25=0.251
+Saved best checkpoint to runs/multitask_best.pt (metric=-51.1639)
+Epoch 3: cls_loss=0.7590 reg_loss=0.5578 val_cls_loss=0.5981 val_reg_loss=0.5196 val_acc=0.7277 val_dist_m=39.96 val_p10=0.132 val_p25=0.434
+Saved best checkpoint to runs/multitask_best.pt (metric=-39.9578)
+Epoch 4: cls_loss=0.6126 reg_loss=0.4985 val_cls_loss=0.4504 val_reg_loss=0.4405 val_acc=0.8255 val_dist_m=33.38 val_p10=0.179 val_p25=0.485
+Saved best checkpoint to runs/multitask_best.pt (metric=-33.3767)
+Epoch 5: cls_loss=0.5064 reg_loss=0.4512 val_cls_loss=0.4629 val_reg_loss=0.4167 val_acc=0.8000 val_dist_m=33.13 val_p10=0.170 val_p25=0.506
+Saved best checkpoint to runs/multitask_best.pt (metric=-33.1343)
+Epoch 6: cls_loss=0.4333 reg_loss=0.4123 val_cls_loss=0.4302 val_reg_loss=0.4484 val_acc=0.8426 val_dist_m=34.72 val_p10=0.149 val_p25=0.498
+Epoch 7: cls_loss=0.4128 reg_loss=0.3828 val_cls_loss=0.5449 val_reg_loss=0.4633 val_acc=0.8383 val_dist_m=33.98 val_p10=0.119 val_p25=0.545
+Epoch 8: cls_loss=0.3648 reg_loss=0.3594 val_cls_loss=0.4293 val_reg_loss=0.3847 val_acc=0.8340 val_dist_m=30.62 val_p10=0.209 val_p25=0.672
+Saved best checkpoint to runs/multitask_best.pt (metric=-30.6177)
+Epoch 9: cls_loss=0.3717 reg_loss=0.3649 val_cls_loss=0.3836 val_reg_loss=0.3964 val_acc=0.8511 val_dist_m=28.79 val_p10=0.230 val_p25=0.621
+Saved best checkpoint to runs/multitask_best.pt (metric=-28.7874)
+Epoch 10: cls_loss=0.3052 reg_loss=0.3205 val_cls_loss=0.3753 val_reg_loss=0.3619 val_acc=0.8170 val_dist_m=25.86 val_p10=0.251 val_p25=0.698
+Saved best checkpoint to runs/multitask_best.pt (metric=-25.8581)
+Epoch 11: cls_loss=0.3024 reg_loss=0.3226 val_cls_loss=0.3522 val_reg_loss=0.3438 val_acc=0.8638 val_dist_m=25.72 val_p10=0.302 val_p25=0.694
+Saved best checkpoint to runs/multitask_best.pt (metric=-25.7221)
+Epoch 12: cls_loss=0.2560 reg_loss=0.2814 val_cls_loss=0.2939 val_reg_loss=0.3423 val_acc=0.8894 val_dist_m=25.46 val_p10=0.272 val_p25=0.711
+Saved best checkpoint to runs/multitask_best.pt (metric=-25.4610)
+Epoch 13: cls_loss=0.2672 reg_loss=0.2905 val_cls_loss=0.3389 val_reg_loss=0.3892 val_acc=0.8979 val_dist_m=27.41 val_p10=0.281 val_p25=0.677
+Epoch 14: cls_loss=0.2376 reg_loss=0.2727 val_cls_loss=0.2390 val_reg_loss=0.3658 val_acc=0.8979 val_dist_m=22.50 val_p10=0.328 val_p25=0.723
+Saved best checkpoint to runs/multitask_best.pt (metric=-22.5017)
+Epoch 15: cls_loss=0.2117 reg_loss=0.2503 val_cls_loss=0.4501 val_reg_loss=0.4851 val_acc=0.8596 val_dist_m=32.36 val_p10=0.255 val_p25=0.672
+Epoch 16: cls_loss=0.2128 reg_loss=0.2633 val_cls_loss=0.2840 val_reg_loss=0.3476 val_acc=0.8979 val_dist_m=25.28 val_p10=0.294 val_p25=0.638
+Epoch 17: cls_loss=0.2079 reg_loss=0.2461 val_cls_loss=0.2159 val_reg_loss=0.3146 val_acc=0.9106 val_dist_m=22.68 val_p10=0.289 val_p25=0.723
+Epoch 18: cls_loss=0.1812 reg_loss=0.2422 val_cls_loss=0.3612 val_reg_loss=0.3830 val_acc=0.8681 val_dist_m=28.02 val_p10=0.234 val_p25=0.617
+Epoch 19: cls_loss=0.1882 reg_loss=0.2374 val_cls_loss=0.2996 val_reg_loss=0.3069 val_acc=0.8979 val_dist_m=23.39 val_p10=0.323 val_p25=0.736
+Epoch 20: cls_loss=0.1771 reg_loss=0.2324 val_cls_loss=0.3081 val_reg_loss=0.3924 val_acc=0.8894 val_dist_m=23.31 val_p10=0.332 val_p25=0.749
+Epoch 21: cls_loss=0.1717 reg_loss=0.2151 val_cls_loss=0.2839 val_reg_loss=0.3063 val_acc=0.8723 val_dist_m=20.96 val_p10=0.315 val_p25=0.753
+Saved best checkpoint to runs/multitask_best.pt (metric=-20.9620)
+Epoch 22: cls_loss=0.1570 reg_loss=0.2253 val_cls_loss=0.2699 val_reg_loss=0.3858 val_acc=0.9064 val_dist_m=25.51 val_p10=0.349 val_p25=0.711
+Epoch 23: cls_loss=0.1483 reg_loss=0.2086 val_cls_loss=0.2794 val_reg_loss=0.3625 val_acc=0.8979 val_dist_m=24.82 val_p10=0.340 val_p25=0.732
+Epoch 24: cls_loss=0.1652 reg_loss=0.2126 val_cls_loss=0.2353 val_reg_loss=0.2700 val_acc=0.9191 val_dist_m=21.02 val_p10=0.319 val_p25=0.787
+Epoch 25: cls_loss=0.1606 reg_loss=0.1978 val_cls_loss=0.3034 val_reg_loss=0.3240 val_acc=0.9021 val_dist_m=21.66 val_p10=0.336 val_p25=0.753
+Epoch 26: cls_loss=0.1338 reg_loss=0.1828 val_cls_loss=0.2551 val_reg_loss=0.2894 val_acc=0.9191 val_dist_m=21.32 val_p10=0.319 val_p25=0.817
+Epoch 27: cls_loss=0.1554 reg_loss=0.1957 val_cls_loss=0.2989 val_reg_loss=0.3047 val_acc=0.8979 val_dist_m=21.48 val_p10=0.357 val_p25=0.766
+Epoch 28: cls_loss=0.1194 reg_loss=0.1899 val_cls_loss=0.2049 val_reg_loss=0.2773 val_acc=0.9277 val_dist_m=20.24 val_p10=0.332 val_p25=0.813
+Saved best checkpoint to runs/multitask_best.pt (metric=-20.2416)
+Epoch 29: cls_loss=0.1484 reg_loss=0.1851 val_cls_loss=0.2229 val_reg_loss=0.2847 val_acc=0.9191 val_dist_m=21.65 val_p10=0.349 val_p25=0.770
+Epoch 30: cls_loss=0.1163 reg_loss=0.1826 val_cls_loss=0.3685 val_reg_loss=0.2994 val_acc=0.9064 val_dist_m=22.55 val_p10=0.353 val_p25=0.740
+Epoch 31: cls_loss=0.1258 reg_loss=0.1717 val_cls_loss=0.2968 val_reg_loss=0.2736 val_acc=0.8936 val_dist_m=20.01 val_p10=0.353 val_p25=0.821
+Saved best checkpoint to runs/multitask_best.pt (metric=-20.0069)
+Epoch 32: cls_loss=0.1249 reg_loss=0.1727 val_cls_loss=0.3276 val_reg_loss=0.2533 val_acc=0.9191 val_dist_m=19.19 val_p10=0.345 val_p25=0.804
+Saved best checkpoint to runs/multitask_best.pt (metric=-19.1942)
+Epoch 33: cls_loss=0.1463 reg_loss=0.1815 val_cls_loss=0.2756 val_reg_loss=0.2904 val_acc=0.9234 val_dist_m=21.11 val_p10=0.404 val_p25=0.766
+Epoch 34: cls_loss=0.1002 reg_loss=0.1665 val_cls_loss=0.2143 val_reg_loss=0.2620 val_acc=0.9362 val_dist_m=19.68 val_p10=0.349 val_p25=0.826
+Epoch 35: cls_loss=0.1111 reg_loss=0.1592 val_cls_loss=0.1839 val_reg_loss=0.2396 val_acc=0.9447 val_dist_m=17.97 val_p10=0.421 val_p25=0.843
+Saved best checkpoint to runs/multitask_best.pt (metric=-17.9659)
+Epoch 36: cls_loss=0.1123 reg_loss=0.1542 val_cls_loss=0.3659 val_reg_loss=0.3230 val_acc=0.9191 val_dist_m=21.71 val_p10=0.319 val_p25=0.809
+Epoch 37: cls_loss=0.1276 reg_loss=0.1817 val_cls_loss=0.2483 val_reg_loss=0.2823 val_acc=0.9234 val_dist_m=19.82 val_p10=0.336 val_p25=0.783
+Epoch 38: cls_loss=0.1075 reg_loss=0.1508 val_cls_loss=0.2454 val_reg_loss=0.2652 val_acc=0.9362 val_dist_m=19.29 val_p10=0.323 val_p25=0.796
+Epoch 39: cls_loss=0.0949 reg_loss=0.1400 val_cls_loss=0.2990 val_reg_loss=0.2615 val_acc=0.9021 val_dist_m=19.23 val_p10=0.366 val_p25=0.804
+Epoch 40: cls_loss=0.0966 reg_loss=0.1425 val_cls_loss=0.3042 val_reg_loss=0.3039 val_acc=0.8936 val_dist_m=21.89 val_p10=0.277 val_p25=0.762
+Epoch 41: cls_loss=0.0987 reg_loss=0.1483 val_cls_loss=0.3164 val_reg_loss=0.2711 val_acc=0.9149 val_dist_m=18.82 val_p10=0.340 val_p25=0.817
+Epoch 42: cls_loss=0.0973 reg_loss=0.1530 val_cls_loss=0.3443 val_reg_loss=0.4034 val_acc=0.9106 val_dist_m=25.58 val_p10=0.349 val_p25=0.800
+Epoch 43: cls_loss=0.0986 reg_loss=0.1471 val_cls_loss=0.2059 val_reg_loss=0.2527 val_acc=0.9319 val_dist_m=18.20 val_p10=0.370 val_p25=0.838
+Epoch 44: cls_loss=0.1217 reg_loss=0.1546 val_cls_loss=0.3019 val_reg_loss=0.3477 val_acc=0.9149 val_dist_m=21.07 val_p10=0.383 val_p25=0.830
+Epoch 45: cls_loss=0.1073 reg_loss=0.1541 val_cls_loss=0.4431 val_reg_loss=0.2839 val_acc=0.8553 val_dist_m=20.75 val_p10=0.345 val_p25=0.796
+Epoch 46: cls_loss=0.0960 reg_loss=0.1406 val_cls_loss=0.2477 val_reg_loss=0.2395 val_acc=0.9362 val_dist_m=17.87 val_p10=0.357 val_p25=0.826
+Saved best checkpoint to runs/multitask_best.pt (metric=-17.8701)
+Epoch 47: cls_loss=0.1305 reg_loss=0.1684 val_cls_loss=0.2974 val_reg_loss=0.2795 val_acc=0.9106 val_dist_m=19.82 val_p10=0.353 val_p25=0.830
+Epoch 48: cls_loss=0.0912 reg_loss=0.1380 val_cls_loss=0.3148 val_reg_loss=0.3139 val_acc=0.9149 val_dist_m=19.93 val_p10=0.400 val_p25=0.817
+Epoch 49: cls_loss=0.1047 reg_loss=0.1401 val_cls_loss=0.2698 val_reg_loss=0.2834 val_acc=0.9191 val_dist_m=18.73 val_p10=0.357 val_p25=0.826
+Epoch 50: cls_loss=0.1024 reg_loss=0.1489 val_cls_loss=0.2529 val_reg_loss=0.3032 val_acc=0.8936 val_dist_m=21.06 val_p10=0.383 val_p25=0.774
+Epoch 51: cls_loss=0.0845 reg_loss=0.1166 val_cls_loss=0.3551 val_reg_loss=0.3423 val_acc=0.9064 val_dist_m=20.01 val_p10=0.396 val_p25=0.834
+Epoch 52: cls_loss=0.0704 reg_loss=0.1211 val_cls_loss=0.3120 val_reg_loss=0.3069 val_acc=0.9191 val_dist_m=18.76 val_p10=0.362 val_p25=0.821
+Epoch 53: cls_loss=0.0635 reg_loss=0.1129 val_cls_loss=0.2797 val_reg_loss=0.2597 val_acc=0.9234 val_dist_m=18.58 val_p10=0.366 val_p25=0.843
+Epoch 54: cls_loss=0.1136 reg_loss=0.1588 val_cls_loss=0.3250 val_reg_loss=0.2568 val_acc=0.9149 val_dist_m=19.15 val_p10=0.383 val_p25=0.779
+Epoch 55: cls_loss=0.1048 reg_loss=0.1338 val_cls_loss=0.2552 val_reg_loss=0.2547 val_acc=0.9191 val_dist_m=18.43 val_p10=0.417 val_p25=0.847
+Epoch 56: cls_loss=0.0949 reg_loss=0.1325 val_cls_loss=0.2618 val_reg_loss=0.3706 val_acc=0.9064 val_dist_m=19.34 val_p10=0.396 val_p25=0.813
+Epoch 57: cls_loss=0.0961 reg_loss=0.1355 val_cls_loss=0.2817 val_reg_loss=0.2228 val_acc=0.8936 val_dist_m=17.54 val_p10=0.400 val_p25=0.860
+Saved best checkpoint to runs/multitask_best.pt (metric=-17.5357)
+Epoch 58: cls_loss=0.0702 reg_loss=0.1098 val_cls_loss=0.3570 val_reg_loss=0.2872 val_acc=0.9064 val_dist_m=18.57 val_p10=0.409 val_p25=0.843
+Epoch 59: cls_loss=0.1031 reg_loss=0.1387 val_cls_loss=0.2381 val_reg_loss=0.2773 val_acc=0.9362 val_dist_m=16.91 val_p10=0.374 val_p25=0.821
+Saved best checkpoint to runs/multitask_best.pt (metric=-16.9127)
+Epoch 60: cls_loss=0.0662 reg_loss=0.1112 val_cls_loss=0.2511 val_reg_loss=0.2848 val_acc=0.9106 val_dist_m=19.04 val_p10=0.379 val_p25=0.834
+Epoch 61: cls_loss=0.0709 reg_loss=0.1148 val_cls_loss=0.2302 val_reg_loss=0.2591 val_acc=0.9447 val_dist_m=18.31 val_p10=0.332 val_p25=0.860
+Epoch 62: cls_loss=0.0657 reg_loss=0.1099 val_cls_loss=0.2263 val_reg_loss=0.2495 val_acc=0.9362 val_dist_m=16.97 val_p10=0.379 val_p25=0.847
+Epoch 63: cls_loss=0.0766 reg_loss=0.1089 val_cls_loss=0.1702 val_reg_loss=0.2564 val_acc=0.9660 val_dist_m=16.16 val_p10=0.409 val_p25=0.855
+Saved best checkpoint to runs/multitask_best.pt (metric=-16.1584)
+Epoch 64: cls_loss=0.0796 reg_loss=0.1064 val_cls_loss=0.2507 val_reg_loss=0.2839 val_acc=0.9319 val_dist_m=17.46 val_p10=0.426 val_p25=0.868
+Epoch 65: cls_loss=0.0863 reg_loss=0.1174 val_cls_loss=0.2641 val_reg_loss=0.2876 val_acc=0.9362 val_dist_m=21.58 val_p10=0.319 val_p25=0.826
+Epoch 66: cls_loss=0.0948 reg_loss=0.1129 val_cls_loss=0.1479 val_reg_loss=0.2343 val_acc=0.9404 val_dist_m=17.16 val_p10=0.413 val_p25=0.855
+Epoch 67: cls_loss=0.0835 reg_loss=0.1111 val_cls_loss=0.2360 val_reg_loss=0.2357 val_acc=0.9191 val_dist_m=17.77 val_p10=0.400 val_p25=0.860
+Epoch 68: cls_loss=0.0695 reg_loss=0.0999 val_cls_loss=0.1910 val_reg_loss=0.2658 val_acc=0.9617 val_dist_m=16.63 val_p10=0.430 val_p25=0.851
+Epoch 69: cls_loss=0.0679 reg_loss=0.1045 val_cls_loss=0.2237 val_reg_loss=0.2450 val_acc=0.9319 val_dist_m=17.36 val_p10=0.409 val_p25=0.847
+Epoch 70: cls_loss=0.0894 reg_loss=0.1140 val_cls_loss=0.2195 val_reg_loss=0.2776 val_acc=0.9404 val_dist_m=20.82 val_p10=0.379 val_p25=0.783
+Epoch 71: cls_loss=0.0765 reg_loss=0.1137 val_cls_loss=0.1999 val_reg_loss=0.2653 val_acc=0.9447 val_dist_m=19.15 val_p10=0.345 val_p25=0.851

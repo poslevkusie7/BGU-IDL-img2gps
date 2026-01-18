@@ -1,0 +1,29 @@
+task: coords  # options: coords, region, multitask
+csv_path: data/metadata1.csv
+img_dir: data/images
+batch_size: 16
+epochs: 30
+lr: 1.0e-4
+weight_decay: 1.0e-4
+num_workers: 4
+seed: 42
+amp: true
+optimizer: adamw
+save_path: model.pt
+best_path: best_model.pt
+freeze_epochs: 0
+randaugment: true
+ra_n: 2
+ra_m: 9
+coord_mode: latlon
+coord_norm: standard
+dinov2_name: vit_small_patch14_dinov2.lvd142m
+pretrained: true
+cls_weight: 0.3
+coord_weight: 1.0
+scheduler: cosine  # options: none, cosine, cosine_warmup
+warmup_steps: 100
+accum_steps: 1
+reg_loss: haversine  # mse or haversine
+reg_margin_m: 10.0
+reg_margin_weight: 0.0

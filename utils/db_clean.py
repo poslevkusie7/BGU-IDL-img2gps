@@ -77,7 +77,7 @@ def main():
     parser.add_argument(
         "--min-samples",
         type=int,
-        default=5,
+        default=25,
         help="Minimum points to form a cluster (noise labeled -1).",
     )
     args = parser.parse_args()

@@ -6,6 +6,6 @@ checkpoints/
 .*
 *.png
 *.zip
-*.pt
 *.html
+*.pt
 *.htmldata/images.zip

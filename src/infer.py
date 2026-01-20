@@ -73,15 +73,34 @@ def haversine_m(lat1, lon1, lat2, lon2):
     return radius * c
 
 
-def load_ground_truth(csv_path, image_name):
+def resolve_id_column(fieldnames, preferred):
+    if not fieldnames:
+        raise ValueError("Ground-truth CSV must include a header row.")
+    field_map = {name.lower(): name for name in fieldnames}
+    if preferred:
+        key = preferred.lower()
+        if key in field_map:
+            return field_map[key]
+        raise ValueError(f"Column '{preferred}' not found in ground-truth CSV.")
+    for candidate in ("image_id", "filename", "file", "image", "name"):
+        if candidate in field_map:
+            return field_map[candidate]
+    raise ValueError("Ground-truth CSV must include an image id column (e.g. image_id or filename).")
+
+
+def load_ground_truth(csv_path, image_name, id_column=None):
     with open(csv_path, newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
-        if reader.fieldnames is None:
-            raise ValueError(f"No header found in {csv_path}")
+        id_col = resolve_id_column(reader.fieldnames, id_column)
         for row in reader:
-            if row.get("image_id") == image_name:
+            raw_id = row.get(id_col, "")
+            if raw_id == image_name:
                 return row
-    raise ValueError(f"Image id '{image_name}' not found in {csv_path}")
+            if Path(raw_id).name == image_name:
+                return row
+            if Path(raw_id).stem == Path(image_name).stem:
+                return row
+    raise ValueError(f"Image id '{image_name}' not found in {csv_path} (column: {id_col}).")
 
 
 def extract_latlon(row):
@@ -92,10 +111,11 @@ def extract_latlon(row):
 
 def main():
     parser = argparse.ArgumentParser(description="Run inference on a single image.")
-    parser.add_argument("--image", required=True, help="Path to an input image.")
+    parser.add_argument("--image", help="Path to an input image.")
+    parser.add_argument("--image-dir", help="Path to a folder of images to run inference on.")
     parser.add_argument(
         "--checkpoint",
-        default="runs/multitask_best.pt",
+        default="runs/coords_best.pt",
         help="Path to a .pt checkpoint (default: runs/multitask_best.pt).",
     )
     parser.add_argument(
@@ -105,10 +125,19 @@ def main():
     )
     parser.add_argument("--img-size", type=int, default=518, help="Resize input to this size.")
     parser.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
-    parser.add_argument("--gt-csv", help="Optional CSV with ground-truth lat/lon and image_id.")
+    parser.add_argument(
+        "--gt-csv",
+        "--gt",
+        dest="gt_csv",
+        help="Optional CSV with ground-truth lat/lon and image id (e.g. image_id or filename).",
+    )
     parser.add_argument(
         "--gt-image-id",
         help="Override image_id lookup in the ground-truth CSV (default: image basename).",
+    )
+    parser.add_argument(
+        "--gt-id-col",
+        help="Optional column name for image id in the ground-truth CSV (e.g. filename).",
     )
     args = parser.parse_args()
 
@@ -123,16 +152,17 @@ def main():
     payload = load_checkpoint(ckpt_path, device)
     model, task = build_model(payload, args.dinov2_name, device)
 
-    image = Image.open(args.image).convert("RGB")
-    tensor = build_transforms(args.img_size)(image).unsqueeze(0).to(device)
+    if not args.image and not args.image_dir:
+        parser.error("Either --image or --image-dir is required.")
 
-    with torch.no_grad():
-        if task == "multitask":
-            logits, coords = model(tensor)
-            pred_class = int(logits.argmax(dim=1).item())
-        else:
-            coords = model(tensor)
-            pred_class = None
+    if args.image_dir:
+        image_paths = sorted(
+            p for p in Path(args.image_dir).iterdir() if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"}
+        )
+        if not image_paths:
+            raise FileNotFoundError(f"No images found in {args.image_dir}")
+    else:
+        image_paths = [Path(args.image)]
 
     coord_norm = payload.get("coord_norm", "none")
     coord_stats = payload.get("coord_stats")
@@ -140,33 +170,48 @@ def main():
         raise ValueError("Checkpoint missing coord_stats required to denormalize coords.")
     if coord_stats is None:
         coord_stats = {"mean": [0.0, 0.0], "std": [1.0, 1.0]}
-    coords = denormalize_coords(coords, coord_stats, coord_norm).cpu().numpy()[0]
 
     coord_mode = payload.get("coord_mode", "latlon")
-    if coord_mode == "latlon":
-        print(f"Predicted lat/lon: {coords[0]:.6f}, {coords[1]:.6f}")
-    else:
-        print(f"Predicted UTM (easting, northing): {coords[0]:.3f}, {coords[1]:.3f}")
-    if pred_class is not None:
-        print(f"Predicted class: {pred_class}")
 
-    if args.gt_csv:
-        image_id = args.gt_image_id or Path(args.image).name
-        row = load_ground_truth(args.gt_csv, image_id)
-        gt_lat, gt_lon = extract_latlon(row)
+    for image_path in image_paths:
+        image = Image.open(image_path).convert("RGB")
+        tensor = build_transforms(args.img_size)(image).unsqueeze(0).to(device)
+
+        with torch.no_grad():
+            if task == "multitask":
+                logits, coords = model(tensor)
+                pred_class = int(logits.argmax(dim=1).item())
+            else:
+                coords = model(tensor)
+                pred_class = None
+
+        coords = denormalize_coords(coords, coord_stats, coord_norm).cpu().numpy()[0]
+
         if coord_mode == "latlon":
-            dist_m = haversine_m(coords[0], coords[1], gt_lat, gt_lon)
-            print(f"GT lat/lon: {gt_lat:.6f}, {gt_lon:.6f}")
+            pred_text = f"Predicted lat/lon: {coords[0]:.6f}, {coords[1]:.6f}"
         else:
-            try:
-                import utm
-            except ImportError as exc:
-                raise ImportError("utm is required to compare UTM predictions with lat/lon ground truth.") from exc
-            gt_e, gt_n, _, _ = utm.from_latlon(gt_lat, gt_lon)
-            dist_m = math.hypot(coords[0] - gt_e, coords[1] - gt_n)
-            print(f"GT lat/lon: {gt_lat:.6f}, {gt_lon:.6f}")
-            print(f"GT UTM (easting, northing): {gt_e:.3f}, {gt_n:.3f}")
-        print(f"Distance to GT (m): {dist_m:.3f}")
+            pred_text = f"Predicted UTM (easting, northing): {coords[0]:.3f}, {coords[1]:.3f}"
+        print(f"{image_path.name} -> {pred_text}")
+        if pred_class is not None:
+            print(f"{image_path.name} -> Predicted class: {pred_class}")
+
+        if args.gt_csv:
+            image_id = args.gt_image_id or image_path.name
+            row = load_ground_truth(args.gt_csv, image_id, id_column=args.gt_id_col)
+            gt_lat, gt_lon = extract_latlon(row)
+            if coord_mode == "latlon":
+                dist_m = haversine_m(coords[0], coords[1], gt_lat, gt_lon)
+                print(f"{image_path.name} -> GT lat/lon: {gt_lat:.6f}, {gt_lon:.6f}")
+            else:
+                try:
+                    import utm
+                except ImportError as exc:
+                    raise ImportError("utm is required to compare UTM predictions with lat/lon ground truth.") from exc
+                gt_e, gt_n, _, _ = utm.from_latlon(gt_lat, gt_lon)
+                dist_m = math.hypot(coords[0] - gt_e, coords[1] - gt_n)
+                print(f"{image_path.name} -> GT lat/lon: {gt_lat:.6f}, {gt_lon:.6f}")
+                print(f"{image_path.name} -> GT UTM (easting, northing): {gt_e:.3f}, {gt_n:.3f}")
+            print(f"{image_path.name} -> Distance to GT (m): {dist_m:.3f}")
 
 
 if __name__ == "__main__":

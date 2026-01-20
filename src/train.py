@@ -64,13 +64,31 @@ class Lookahead(optim.Optimizer):
         return loss
 
 
+class RandomWhiteBalance:
+    """
+    Applies random white balance shift by multiplying each channel with a random factor.
+    This is a simple approximation for white balance augmentation.
+    """
+    def __init__(self, factor_range=(0.9, 1.1), p=1.0):
+        self.factor_range = factor_range
+        self.p = p
+
+    def __call__(self, tensor):
+        if random.random() < self.p:
+            factors = torch.FloatTensor(3).uniform_(*self.factor_range)
+            tensor = tensor * factors.view(3, 1, 1)
+            tensor = torch.clamp(tensor, 0, 1)
+        return tensor
+
+
+
 def build_transforms(mode="train", img_size=518, randaugment=False, ra_n=2, ra_m=9):
     mean = [0.485, 0.456, 0.406]
     std = [0.229, 0.224, 0.225]
 
     if mode == "train":
         ops = [
-            transforms.RandomResizedCrop(img_size, scale=(0.8, 1.0), ratio=(0.9, 1.1)),
+            transforms.RandomResizedCrop(img_size, scale=(0.92, 1.0), ratio=(0.95, 1.05)),
         ]
         if randaugment:
             ops.append(transforms.RandAugment(num_ops=ra_n, magnitude=ra_m))
@@ -84,6 +102,7 @@ def build_transforms(mode="train", img_size=518, randaugment=False, ra_n=2, ra_m
 
     ops += [
         transforms.ToTensor(),
+        RandomWhiteBalance(factor_range=(0.85, 1.15), p=0.5),
         transforms.Normalize(mean=mean, std=std),
     ]
     return transforms.Compose(ops)

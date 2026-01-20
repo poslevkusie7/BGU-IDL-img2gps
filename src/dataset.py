@@ -1,7 +1,7 @@
 import os
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 import torch
 from torch.utils.data import Dataset
 
@@ -82,7 +82,10 @@ class LocalizationDataset(Dataset):
         img_name = self.image_ids[idx]
         img_path = os.path.join(self.img_dir, img_name)
 
-        image = Image.open(img_path).convert("RGB")
+
+        image = Image.open(img_path)
+        image = ImageOps.exif_transpose(image)
+        image = image.convert("RGB")
 
         if self.transform:
             image = self.transform(image)

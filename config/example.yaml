@@ -1,6 +1,5 @@
-
 # config/example.yaml
-task: coords                # coords or multitask
+task: multitask                # coords or multitask
 csv_path: data/metadata2.csv
 img_dir: data/images
 
@@ -20,11 +19,11 @@ randaugment: false
 ra_n: 2
 ra_m: 9
 
-coord_mode: latlon
+coord_mode: utm
 coord_norm: standard
 dinov2_name: vit_base_patch14_dinov2.lvd142m
 
-cls_weight: 1.0
+cls_weight: 0.3
 coord_weight: 1.0
 
 scheduler: cosine_warmup  # options: none, cosine, cosine_warmup

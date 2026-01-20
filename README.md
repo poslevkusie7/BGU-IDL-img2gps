@@ -8,6 +8,11 @@ Image-to-GPS regression on university campus: training and evaluating models tha
 - pandas, pillow
 - utm (only if you use `--coord-mode utm`)
 
+To install environment and requirements run from the root folder:
+
+chmod +x setup.sh
+./setup.sh
+
 ## Data
 CSV must include: `image_id`, `sector_label`, `lat`, `lon`.
 
@@ -27,7 +32,7 @@ python -m src.train --task coords --csv-path data/metadata1.csv --img-dir data/i
 
 Multitask (shared DINOv2 backbone with classification + regression heads) via YAML:
 ```
-python -m src.train --config config/example.yaml
+python -m src.train --config config/example.yaml | tee runs/train_log.txt
 ```
 CLI args override config values.
 

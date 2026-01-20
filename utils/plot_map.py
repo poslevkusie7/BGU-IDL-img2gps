@@ -27,7 +27,7 @@ def plot_with_folium(csv_path, output_html, zoom=13):
 
 def main():
     parser = argparse.ArgumentParser(description="Plot lat/lon CSV onto an interactive map.")
-    parser.add_argument("--csv-path", default="data/metadata1.csv")
+    parser.add_argument("--csv-path", default="data/metadata2.csv")
     parser.add_argument("--output-html", default="map.html")
     parser.add_argument("--zoom", type=int, default=13)
     args = parser.parse_args()

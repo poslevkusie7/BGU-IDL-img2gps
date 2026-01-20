@@ -1,4 +1,6 @@
 import argparse
+import csv
+import math
 from pathlib import Path
 
 from PIL import Image
@@ -60,6 +62,34 @@ def build_model(payload, dinov2_name, device):
     return model, task
 
 
+def haversine_m(lat1, lon1, lat2, lon2):
+    radius = 6371000.0
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    c = 2 * math.asin(min(1.0, math.sqrt(a)))
+    return radius * c
+
+
+def load_ground_truth(csv_path, image_name):
+    with open(csv_path, newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        if reader.fieldnames is None:
+            raise ValueError(f"No header found in {csv_path}")
+        for row in reader:
+            if row.get("image_id") == image_name:
+                return row
+    raise ValueError(f"Image id '{image_name}' not found in {csv_path}")
+
+
+def extract_latlon(row):
+    if "lat" in row and "lon" in row:
+        return float(row["lat"]), float(row["lon"])
+    raise ValueError("Ground-truth CSV must include 'lat' and 'lon' columns.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run inference on a single image.")
     parser.add_argument("--image", required=True, help="Path to an input image.")
@@ -75,6 +105,11 @@ def main():
     )
     parser.add_argument("--img-size", type=int, default=518, help="Resize input to this size.")
     parser.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
+    parser.add_argument("--gt-csv", help="Optional CSV with ground-truth lat/lon and image_id.")
+    parser.add_argument(
+        "--gt-image-id",
+        help="Override image_id lookup in the ground-truth CSV (default: image basename).",
+    )
     args = parser.parse_args()
 
     if args.device == "auto":
@@ -114,6 +149,24 @@ def main():
         print(f"Predicted UTM (easting, northing): {coords[0]:.3f}, {coords[1]:.3f}")
     if pred_class is not None:
         print(f"Predicted class: {pred_class}")
+
+    if args.gt_csv:
+        image_id = args.gt_image_id or Path(args.image).name
+        row = load_ground_truth(args.gt_csv, image_id)
+        gt_lat, gt_lon = extract_latlon(row)
+        if coord_mode == "latlon":
+            dist_m = haversine_m(coords[0], coords[1], gt_lat, gt_lon)
+            print(f"GT lat/lon: {gt_lat:.6f}, {gt_lon:.6f}")
+        else:
+            try:
+                import utm
+            except ImportError as exc:
+                raise ImportError("utm is required to compare UTM predictions with lat/lon ground truth.") from exc
+            gt_e, gt_n, _, _ = utm.from_latlon(gt_lat, gt_lon)
+            dist_m = math.hypot(coords[0] - gt_e, coords[1] - gt_n)
+            print(f"GT lat/lon: {gt_lat:.6f}, {gt_lon:.6f}")
+            print(f"GT UTM (easting, northing): {gt_e:.3f}, {gt_n:.3f}")
+        print(f"Distance to GT (m): {dist_m:.3f}")
 
 
 if __name__ == "__main__":

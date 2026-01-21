@@ -2,31 +2,41 @@
 # config/example.yaml
 task: coords                # coords or multitask
 csv_path: data/metadata2.csv
+train_csv: data/splits/train.csv
+val_csv: data/splits/val.csv
+test_csv: data/splits/test.csv
 img_dir: data/images
 
 batch_size: 16
-epochs: 400
+epochs: 150
 lr: 1.0e-4
 weight_decay: 1.0e-4
 num_workers: 4
 seed: 42
 amp: true
 optimizer: adamw
-save_path: model.pt
-best_path: best_model.pt
+save_path: null            # disable final save; use best/last/prev instead
 
 freeze_epochs: 0
 randaugment: false
 ra_n: 2
 ra_m: 9
 
-coord_mode: latlon
 coord_norm: standard
 dinov2_name: vit_base_patch14_dinov2.lvd142m
-
-cls_weight: 1.0
-coord_weight: 1.0
 
 scheduler: cosine_warmup  # options: none, cosine, cosine_warmup
 warmup_steps: 100
 accum_steps: 1
+
+runs:
+  - coord_mode: utm
+    best_path: runs/coords_utm/best.pt
+    last_path: runs/coords_utm/last.pt
+    prev_path: runs/coords_utm/prev.pt
+    log_path: runs/coords_utm/log.txt
+  - coord_mode: latlon
+    best_path: runs/coords_latlon/best.pt
+    last_path: runs/coords_latlon/last.pt
+    prev_path: runs/coords_latlon/prev.pt
+    log_path: runs/coords_latlon/log.txt

@@ -250,6 +250,15 @@ def main():
             gt_e, gt_n, _, _ = utm.from_latlon(gt_lat, gt_lon)
             dist_m = math.hypot(coords[0] - gt_e, coords[1] - gt_n)
         distances.append(float(dist_m))
+        if coord_mode == "latlon":
+            pred_text = f"{coords[0]:.6f}, {coords[1]:.6f}"
+        else:
+            pred_text = f"{coords[0]:.3f}, {coords[1]:.3f}"
+        print(
+            f"{image_path.name} -> pred={pred_text} "
+            f"gt={gt_lat:.6f}, {gt_lon:.6f} "
+            f"dist_m={dist_m:.3f}"
+        )
 
     if distances:
         count = len(distances)

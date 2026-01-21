@@ -8,8 +8,8 @@ test_csv: data/splits/test.csv
 img_dir: data/images
 
 batch_size: 16
-epochs: 150
-lr: 1.0e-4
+epochs: 70
+lr: 2.0e-4
 weight_decay: 1.0e-4
 num_workers: 4
 seed: 42

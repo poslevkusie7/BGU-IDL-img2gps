@@ -32,11 +32,11 @@ accum_steps: 1
 runs:
   - coord_mode: utm
     best_path: runs/coords_utm/best.pt
-    last_path: runs/coords_utm/last.pt
-    prev_path: runs/coords_utm/prev.pt
+    last_path: null
+    prev_path: null
     log_path: runs/coords_utm/log.txt
   - coord_mode: latlon
     best_path: runs/coords_latlon/best.pt
-    last_path: runs/coords_latlon/last.pt
-    prev_path: runs/coords_latlon/prev.pt
+    last_path: null
+    prev_path: null
     log_path: runs/coords_latlon/log.txt

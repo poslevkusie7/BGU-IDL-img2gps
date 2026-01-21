@@ -571,6 +571,12 @@ def build_parser(config_parser=None):
         default=0.1,
         help="Validation split ratio when train/val CSVs are not provided.",
     )
+    parser.add_argument(
+        "--run-index",
+        type=int,
+        default=None,
+        help="When config defines runs, select a single run by index (0-based).",
+    )
     return parser
 
 
@@ -830,6 +836,11 @@ def main():
         cfg = load_config(cfg_args.config)
         run_cfgs = expand_runs(cfg)
         if run_cfgs is not None:
+            cli_args = parser.parse_args(remaining)
+            if cli_args.run_index is not None:
+                if cli_args.run_index < 0 or cli_args.run_index >= len(run_cfgs):
+                    raise ValueError(f"run_index must be between 0 and {len(run_cfgs) - 1}.")
+                run_cfgs = [run_cfgs[cli_args.run_index]]
             for run_cfg in run_cfgs:
                 args = args_from_config(run_cfg, parser)
                 run_training(args)

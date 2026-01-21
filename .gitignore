@@ -9,3 +9,5 @@ checkpoints/
 *.html
 *.pt
 *.htmldata/images.zip
+data/processed_images/
+gt.csv

@@ -1,6 +1,7 @@
 import argparse
 import csv
 import math
+import statistics
 from pathlib import Path
 
 from PIL import Image
@@ -171,7 +172,18 @@ def main():
         "--gt-id-col",
         help="Optional column name for image id in the ground-truth CSV (e.g. filename).",
     )
+    parser.add_argument(
+        "--use-gt-defaults",
+        action="store_true",
+        help="Use data/processed_images and data/gt.csv when image-dir/gt-csv are not provided.",
+    )
     args = parser.parse_args()
+
+    if args.use_gt_defaults:
+        if not args.image_dir:
+            args.image_dir = "data/processed_images"
+        if not args.gt_csv:
+            args.gt_csv = "data/gt.csv"
 
     if args.device == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -186,6 +198,8 @@ def main():
 
     if not args.image and not args.image_dir:
         parser.error("Either --image or --image-dir is required.")
+    if not args.gt_csv:
+        parser.error("--gt-csv is required to compute dataset metrics.")
 
     if args.image_dir:
         image_csv = args.image_csv or args.gt_csv
@@ -201,6 +215,7 @@ def main():
     else:
         image_paths = [Path(args.image)]
 
+    distances = []
     for image_path in image_paths:
         image = Image.open(image_path).convert("RGB")
         tensor = build_transforms(args.img_size)(image).unsqueeze(0).to(device)
@@ -222,30 +237,35 @@ def main():
         coords = denormalize_coords(coords, coord_stats, coord_norm).cpu().numpy()[0]
 
         coord_mode = payload.get("coord_mode", "latlon")
+        image_id = args.gt_image_id or image_path.name
+        row = load_ground_truth(args.gt_csv, image_id, id_column=args.gt_id_col)
+        gt_lat, gt_lon = extract_latlon(row)
         if coord_mode == "latlon":
-            pred_text = f"Predicted lat/lon: {coords[0]:.6f}, {coords[1]:.6f}"
+            dist_m = haversine_m(coords[0], coords[1], gt_lat, gt_lon)
         else:
-            pred_text = f"Predicted UTM (easting, northing): {coords[0]:.3f}, {coords[1]:.3f}"
-        print(f"{image_path.name} -> {pred_text}")
-        if pred_class is not None:
-            print(f"{image_path.name} -> Predicted class: {pred_class}")
-        if args.gt_csv:
-            image_id = args.gt_image_id or image_path.name
-            row = load_ground_truth(args.gt_csv, image_id, id_column=args.gt_id_col)
-            gt_lat, gt_lon = extract_latlon(row)
-            if coord_mode == "latlon":
-                dist_m = haversine_m(coords[0], coords[1], gt_lat, gt_lon)
-                print(f"{image_path.name} -> GT lat/lon: {gt_lat:.6f}, {gt_lon:.6f}")
-            else:
-                try:
-                    import utm
-                except ImportError as exc:
-                    raise ImportError("utm is required to compare UTM predictions with lat/lon ground truth.") from exc
-                gt_e, gt_n, _, _ = utm.from_latlon(gt_lat, gt_lon)
-                dist_m = math.hypot(coords[0] - gt_e, coords[1] - gt_n)
-                print(f"{image_path.name} -> GT lat/lon: {gt_lat:.6f}, {gt_lon:.6f}")
-                print(f"{image_path.name} -> GT UTM (easting, northing): {gt_e:.3f}, {gt_n:.3f}")
-            print(f"{image_path.name} -> Distance to GT (m): {dist_m:.3f}")
+            try:
+                import utm
+            except ImportError as exc:
+                raise ImportError("utm is required to compare UTM predictions with lat/lon ground truth.") from exc
+            gt_e, gt_n, _, _ = utm.from_latlon(gt_lat, gt_lon)
+            dist_m = math.hypot(coords[0] - gt_e, coords[1] - gt_n)
+        distances.append(float(dist_m))
+
+    if distances:
+        count = len(distances)
+        mean_dist = sum(distances) / count
+        median_dist = statistics.median(distances)
+        rmse_dist = math.sqrt(sum(d * d for d in distances) / count)
+        p10 = sum(d <= 10.0 for d in distances) / count
+        p25 = sum(d <= 25.0 for d in distances) / count
+        print(
+            "metrics: "
+            f"val_dist_m={mean_dist:.2f} "
+            f"median_dist_m={median_dist:.2f} "
+            f"rmse_dist_m={rmse_dist:.2f} "
+            f"p10m={p10:.3f} "
+            f"p25m={p25:.3f}"
+        )
 
 
 if __name__ == "__main__":

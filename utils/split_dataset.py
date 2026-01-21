@@ -30,18 +30,21 @@ def _group_rows(fieldnames, rows, group_col, grid_meters):
     use_col = group_col and group_col in fieldnames
 
     for idx, row in enumerate(rows):
-        group_id = None
-        if use_col:
-            raw = row.get(group_col, "").strip()
-            if raw and raw != "-1":
-                group_id = f"{group_col}:{raw}"
-        if group_id is None:
-            if "lat" in row and "lon" in row:
-                lat = float(row["lat"])
-                lon = float(row["lon"])
-                group_id = _grid_group(lat, lon, grid_meters)
-            else:
-                group_id = f"row:{idx}"
+        if group_col is None:
+            group_id = f"row:{idx}"
+        else:
+            group_id = None
+            if use_col:
+                raw = row.get(group_col, "").strip()
+                if raw and raw != "-1":
+                    group_id = f"{group_col}:{raw}"
+            if group_id is None:
+                if "lat" in row and "lon" in row:
+                    lat = float(row["lat"])
+                    lon = float(row["lon"])
+                    group_id = _grid_group(lat, lon, grid_meters)
+                else:
+                    group_id = f"row:{idx}"
 
         groups.setdefault(group_id, []).append(idx)
     return groups
@@ -132,14 +135,14 @@ def main():
     parser.add_argument("--test-frac", type=float, default=0.2)
     parser.add_argument("--val-frac", type=float, default=0.2)
     parser.add_argument(
-        "--val-from-total",
+        "--val-from-train",
         action="store_true",
-        help="Interpret val-frac as a fraction of total (default: fraction of train split).",
+        help="Interpret val-frac as a fraction of the remaining train split.",
     )
     parser.add_argument(
         "--group-col",
-        default="cluster",
-        help="Column used to group similar images (set to 'none' to disable).",
+        default="none",
+        help="Column used to group similar images (set to 'none' for pure random splits).",
     )
     parser.add_argument(
         "--grid-meters",
@@ -167,7 +170,7 @@ def main():
         args.seed,
         args.test_frac,
         args.val_frac,
-        val_from_train=not args.val_from_total,
+        val_from_train=args.val_from_train,
     )
 
     out_dir = args.output_dir

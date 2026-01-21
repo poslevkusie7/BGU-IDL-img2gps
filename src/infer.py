@@ -115,7 +115,6 @@ def load_ground_truth(csv_path, image_name, id_column=None):
     with open(csv_path, newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         id_col = resolve_id_column(reader.fieldnames, id_column)
-        id_col = resolve_id_column(reader.fieldnames, id_column)
         for row in reader:
             raw_id = row.get(id_col, "")
             if raw_id == image_name:
@@ -123,15 +122,9 @@ def load_ground_truth(csv_path, image_name, id_column=None):
             if Path(raw_id).name == image_name:
                 return row
             if Path(raw_id).stem == Path(image_name).stem:
-            raw_id = row.get(id_col, "")
-            if raw_id == image_name:
-                return row
-            if Path(raw_id).name == image_name:
-                return row
-            if Path(raw_id).stem == Path(image_name).stem:
                 return row
     raise ValueError(f"Image id '{image_name}' not found in {csv_path} (column: {id_col}).")
-    raise ValueError(f"Image id '{image_name}' not found in {csv_path} (column: {id_col}).")
+
 
 
 def extract_latlon(row):
@@ -171,18 +164,8 @@ def main():
         help="Optional CSV with ground-truth lat/lon and image id (e.g. image_id or filename).",
     )
     parser.add_argument(
-        "--gt-csv",
-        "--gt",
-        dest="gt_csv",
-        help="Optional CSV with ground-truth lat/lon and image id (e.g. image_id or filename).",
-    )
-    parser.add_argument(
         "--gt-image-id",
         help="Override image_id lookup in the ground-truth CSV (default: image basename).",
-    )
-    parser.add_argument(
-        "--gt-id-col",
-        help="Optional column name for image id in the ground-truth CSV (e.g. filename).",
     )
     parser.add_argument(
         "--gt-id-col",
@@ -246,24 +229,6 @@ def main():
         print(f"{image_path.name} -> {pred_text}")
         if pred_class is not None:
             print(f"{image_path.name} -> Predicted class: {pred_class}")
-
-        if args.gt_csv:
-            image_id = args.gt_image_id or image_path.name
-            row = load_ground_truth(args.gt_csv, image_id, id_column=args.gt_id_col)
-            gt_lat, gt_lon = extract_latlon(row)
-            if coord_mode == "latlon":
-                dist_m = haversine_m(coords[0], coords[1], gt_lat, gt_lon)
-                print(f"{image_path.name} -> GT lat/lon: {gt_lat:.6f}, {gt_lon:.6f}")
-            else:
-                try:
-                    import utm
-                except ImportError as exc:
-                    raise ImportError("utm is required to compare UTM predictions with lat/lon ground truth.") from exc
-                gt_e, gt_n, _, _ = utm.from_latlon(gt_lat, gt_lon)
-                dist_m = math.hypot(coords[0] - gt_e, coords[1] - gt_n)
-                print(f"{image_path.name} -> GT lat/lon: {gt_lat:.6f}, {gt_lon:.6f}")
-                print(f"{image_path.name} -> GT UTM (easting, northing): {gt_e:.3f}, {gt_n:.3f}")
-            print(f"{image_path.name} -> Distance to GT (m): {dist_m:.3f}")
         if args.gt_csv:
             image_id = args.gt_image_id or image_path.name
             row = load_ground_truth(args.gt_csv, image_id, id_column=args.gt_id_col)

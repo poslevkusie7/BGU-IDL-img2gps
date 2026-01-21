@@ -1,0 +1,17 @@
+Epoch 1: train_loss=0.944814 val_loss=0.729156 val_mse=2.277e+03 val_dist_m=56.34 p10m=0.039 p25m=0.183
+Saved best checkpoint to runs/coords_utm/best.pt (metric=-56.3403)
+Epoch 2: train_loss=0.683863 val_loss=0.551422 val_mse=1.614e+03 val_dist_m=48.36 p10m=0.055 p25m=0.246
+Saved best checkpoint to runs/coords_utm/best.pt (metric=-48.3564)
+Epoch 3: train_loss=0.599488 val_loss=0.567850 val_mse=1.291e+03 val_dist_m=41.47 p10m=0.092 p25m=0.379
+Saved best checkpoint to runs/coords_utm/best.pt (metric=-41.4694)
+Epoch 4: train_loss=0.585167 val_loss=0.461131 val_mse=1.117e+03 val_dist_m=38.85 p10m=0.084 p25m=0.343
+Saved best checkpoint to runs/coords_utm/best.pt (metric=-38.8523)
+Epoch 5: train_loss=0.534407 val_loss=0.438748 val_mse=8.954e+02 val_dist_m=33.70 p10m=0.106 p25m=0.444
+Saved best checkpoint to runs/coords_utm/best.pt (metric=-33.6976)
+Epoch 6: train_loss=0.513226 val_loss=0.463539 val_mse=1.088e+03 val_dist_m=37.08 p10m=0.118 p25m=0.415
+Epoch 7: train_loss=0.493518 val_loss=0.497849 val_mse=1.135e+03 val_dist_m=36.61 p10m=0.108 p25m=0.457
+Epoch 8: train_loss=0.446850 val_loss=0.458535 val_mse=1.255e+03 val_dist_m=36.59 p10m=0.128 p25m=0.473
+Epoch 9: train_loss=0.455199 val_loss=0.484593 val_mse=1.211e+03 val_dist_m=35.87 p10m=0.147 p25m=0.486
+Epoch 10: train_loss=0.441055 val_loss=0.438247 val_mse=8.220e+02 val_dist_m=32.11 p10m=0.140 p25m=0.476
+Saved best checkpoint to runs/coords_utm/best.pt (metric=-32.1099)
+Epoch 11: train_loss=0.398246 val_loss=0.424384 val_mse=9.533e+02 val_dist_m=32.49 p10m=0.152 p25m=0.532

@@ -1,14 +1,14 @@
 
 # config/example.yaml
-task: coords                # coords or multitask
-csv_path: data/metadata2.csv
+task: multitask                # coords or multitask
+csv_path: data/metadata.csv
 train_csv: data/splits/train.csv
 val_csv: data/splits/val.csv
 test_csv: data/splits/test.csv
 img_dir: data/images
 
 batch_size: 16
-epochs: 70
+epochs: 300
 lr: 2.0e-4
 weight_decay: 1.0e-4
 num_workers: 4

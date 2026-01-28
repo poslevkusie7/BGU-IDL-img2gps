@@ -1,5 +1,6 @@
 .vscode
 data/images/
+data/old_data/
 .DS_Store
 *.pyc
 checkpoints/

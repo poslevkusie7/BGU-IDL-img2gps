@@ -35,7 +35,7 @@ def denormalize_coords(coords, coord_stats, coord_norm):
 
 
 def load_checkpoint(path, device):
-    payload = torch.load(path, map_location=device)
+    payload = torch.load(path, map_location=device, weights_only=False)
     if not isinstance(payload, dict) or "model_state" not in payload:
         raise ValueError(f"Checkpoint {path} is missing a 'model_state' dict.")
     return payload
@@ -251,12 +251,12 @@ def main():
             dist_m = math.hypot(coords[0] - gt_e, coords[1] - gt_n)
         distances.append(float(dist_m))
         if coord_mode == "latlon":
-            pred_text = f"{coords[0]:.6f}, {coords[1]:.6f}"
+            pred_text = f"{coords[0]:.8f}, {coords[1]:.8f}"
         else:
             pred_text = f"{coords[0]:.3f}, {coords[1]:.3f}"
         print(
             f"{image_path.name} -> pred={pred_text} "
-            f"gt={gt_lat:.6f}, {gt_lon:.6f} "
+            f"gt={gt_lat:.8f}, {gt_lon:.8f} "
             f"dist_m={dist_m:.3f}"
         )
 

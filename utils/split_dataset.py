@@ -129,7 +129,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Split metadata CSV into train/val/test with optional grouping."
     )
-    parser.add_argument("--input-csv", default="data/metadata2.csv")
+    parser.add_argument("--input-csv", default="data/metadata.csv")
     parser.add_argument("--output-dir", default="data/splits")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--test-frac", type=float, default=0.2)

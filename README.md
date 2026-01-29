@@ -107,10 +107,10 @@ python -m src.train \
 
 Multi-head (classification + regression) using config:
 ```bash
-python -m src.train --config config/example.yaml
+python -m src.train --config config/config.yaml
 ```
 
-Checkpoints are saved based on the config (see `config/example.yaml`).
+Checkpoints are saved based on the config (see `config/config.yaml`).
 
 ## Testing / Inference
 Batch inference + metrics:

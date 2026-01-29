@@ -1,6 +1,5 @@
+# config/config.yaml
 
-# config/example.yaml
-task: multitask                # coords or multitask
 csv_path: data/metadata.csv
 train_csv: data/splits/train.csv
 val_csv: data/splits/val.csv
@@ -30,13 +29,21 @@ warmup_steps: 100
 accum_steps: 1
 
 runs:
-  - coord_mode: utm
+  - task: coords
+    coord_mode: utm
     best_path: runs/coords_utm/best.pt
     last_path: null
     prev_path: null
     log_path: runs/coords_utm/log.txt
-  - coord_mode: latlon
+  - task: coords
+    coord_mode: latlon
     best_path: runs/coords_latlon/best.pt
     last_path: null
     prev_path: null
     log_path: runs/coords_latlon/log.txt
+  - task: multitask
+    coord_mode: latlon
+    best_path: runs/multitask_latlon/best.pt
+    last_path: null
+    prev_path: null
+    log_path: runs/multitask_latlon/log.txt

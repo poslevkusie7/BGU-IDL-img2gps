@@ -41,10 +41,7 @@ conda install pytorch torchvision torchaudio pytorch-cuda="$CUDA_VERSION" \
 # Install remaining Python packages
 echo "Installing additional packages ..."
 pip install --upgrade pip
-pip install timm pandas pillow utm folium
-
-# Optional: install UTM if needed
-# pip install utm
+pip install -r requirements.txt
 
 echo ""
 echo "============================================================="

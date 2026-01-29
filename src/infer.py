@@ -83,7 +83,7 @@ def resolve_id_column(fieldnames, preferred):
         if key in field_map:
             return field_map[key]
         raise ValueError(f"Column '{preferred}' not found in ground-truth CSV.")
-    for candidate in ("image_id", "filename", "file", "image", "name"):
+    for candidate in ("image_id", "image_name", "filename", "file", "image", "name"):
         if candidate in field_map:
             return field_map[candidate]
     raise ValueError("Ground-truth CSV must include an image id column (e.g. image_id or filename).")
@@ -131,7 +131,12 @@ def load_ground_truth(csv_path, image_name, id_column=None):
 def extract_latlon(row):
     if "lat" in row and "lon" in row:
         return float(row["lat"]), float(row["lon"])
-    raise ValueError("Ground-truth CSV must include 'lat' and 'lon' columns.")
+    field_map = {name.lower(): name for name in row.keys()}
+    lat_key = field_map.get("lat") or field_map.get("latitude")
+    lon_key = field_map.get("lon") or field_map.get("longitude")
+    if lat_key and lon_key:
+        return float(row[lat_key]), float(row[lon_key])
+    raise ValueError("Ground-truth CSV must include latitude/longitude columns.")
 
 
 def main():
@@ -149,7 +154,7 @@ def main():
     parser.add_argument(
         "--checkpoint",
         default="runs/coords_best.pt",
-        help="Path to a .pt checkpoint (default: runs/multitask_best.pt).",
+        help="Path to a .pt checkpoint (default: runs/coords_best.pt).",
     )
     parser.add_argument(
         "--dinov2-name",
@@ -181,7 +186,7 @@ def main():
 
     if args.use_gt_defaults:
         if not args.image_dir:
-            args.image_dir = "data/processed_images"
+            args.image_dir = "data/images"
         if not args.gt_csv:
             args.gt_csv = "data/gt.csv"
 

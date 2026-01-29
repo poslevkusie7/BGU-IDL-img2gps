@@ -745,6 +745,7 @@ def run_training(args):
                 "coord_stats": coord_stats,
                 "coord_norm": args.coord_norm,
                 "coord_mode": args.coord_mode,
+                "dinov2_name": args.dinov2_name,
             }
             save_best = make_best_saver(base_payload, args.best_path)
             epoch_saver = make_epoch_saver(
@@ -786,6 +787,7 @@ def run_training(args):
                 "coord_stats": coord_stats,
                 "coord_norm": args.coord_norm,
                 "coord_mode": args.coord_mode,
+                "dinov2_name": args.dinov2_name,
             }
             save_best = make_best_saver(base_payload, args.best_path)
             epoch_saver = make_epoch_saver(

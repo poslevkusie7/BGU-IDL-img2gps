@@ -1,0 +1,13 @@
+numpy
+pandas
+pillow
+torch
+torchvision
+timm
+pyyaml
+tqdm
+utm
+folium
+matplotlib
+scipy
+pillow-heif

@@ -1,0 +1,9 @@
+Epoch 1: train_loss=0.925756 val_loss=0.824061 val_mse=4.023e-07 val_dist_m=69.21 p10m=0.102 p25m=0.268
+Saved best checkpoint to runs/coords_latlon/best.pt (metric=-69.2133)
+Epoch 2: train_loss=0.845759 val_loss=0.803021 val_mse=3.848e-07 val_dist_m=69.60 p10m=0.051 p25m=0.223
+Epoch 3: train_loss=0.786119 val_loss=0.681783 val_mse=3.286e-07 val_dist_m=59.52 p10m=0.108 p25m=0.306
+Saved best checkpoint to runs/coords_latlon/best.pt (metric=-59.5246)
+Epoch 4: train_loss=0.719764 val_loss=0.669964 val_mse=3.276e-07 val_dist_m=59.41 p10m=0.083 p25m=0.306
+Saved best checkpoint to runs/coords_latlon/best.pt (metric=-59.4061)
+Epoch 5: train_loss=0.689009 val_loss=0.662377 val_mse=3.113e-07 val_dist_m=56.90 p10m=0.115 p25m=0.338
+Saved best checkpoint to runs/coords_latlon/best.pt (metric=-56.9035)

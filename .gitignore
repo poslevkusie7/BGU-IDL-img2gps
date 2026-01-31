@@ -1,11 +1,14 @@
 .vscode
 data/images/
+data/old_data/
 .DS_Store
 *.pyc
 checkpoints/
 .*
 *.png
 *.zip
-*.pt
 *.html
+*.pt
 *.htmldata/images.zip
+data/processed_images/
+data_set

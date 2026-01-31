@@ -1,0 +1,51 @@
+# config/config.yaml
+
+csv_path: data/metadata.csv
+train_csv: data/splits/train.csv
+val_csv: data/splits/val.csv
+test_csv: data/splits/test.csv
+img_dir: data/images
+
+batch_size: 16
+epochs: 350
+lr: 0.5e-4
+weight_decay: 1.0e-4
+num_workers: 4
+seed: 42
+amp: true
+optimizer: adamw
+save_path: null            # disable final save; use best/last/prev instead
+
+freeze_epochs: 0
+randaugment: false
+ra_n: 2
+ra_m: 9
+
+coord_norm: standard
+dinov2_name: vit_base_patch14_dinov2.lvd142m
+
+scheduler: cosine_warmup  # options: none, cosine, cosine_warmup
+warmup_steps: 100
+accum_steps: 1
+
+runs:
+  # - task: coords
+  #   coord_mode: utm
+  #   best_path: runs/coords_utm/best.pt
+  #   last_path: null
+  #   prev_path: null
+  #   log_path: runs/coords_utm/log.txt
+  # - task: coords
+  #   coord_mode: latlon
+  #   best_path: runs/coords_latlon/best.pt
+  #   last_path: null
+  #   prev_path: null
+  #   log_path: runs/coords_latlon/log.txt
+  - task: multitask
+    сoord_mode: utm
+    cls_weight: 0.1
+    coord_weight: 1.0
+    best_path: runs/multitask_latlon/best.pt
+    last_path: null
+    prev_path: null
+    log_path: runs/multitask_latlon/log.txt

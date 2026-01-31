@@ -180,15 +180,15 @@ def main():
     parser.add_argument(
         "--use-gt-defaults",
         action="store_true",
-        help="Use data/processed_images and data/gt.csv when image-dir/gt-csv are not provided.",
+        help="Use dataset_root/images and data/gt.csv when image-dir/gt-csv are not provided.",
     )
     args = parser.parse_args()
 
     if args.use_gt_defaults:
         if not args.image_dir:
-            args.image_dir = "data/images"
+            args.image_dir = "dataset_root/images"
         if not args.gt_csv:
-            args.gt_csv = "data/gt.csv"
+            args.gt_csv = "dataset_root/gt.csv"
 
     if args.device == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

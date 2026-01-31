@@ -532,11 +532,11 @@ def build_parser(config_parser=None):
     parents = [config_parser] if config_parser is not None else []
     parser = argparse.ArgumentParser(parents=parents)
     parser.add_argument("--task", choices=["coords", "multitask"], required=False)
-    parser.add_argument("--csv-path", default="data/metadata1.csv")
+    parser.add_argument("--csv-path", default="dataset_root/metadata.csv")
     parser.add_argument("--train-csv", default=None)
     parser.add_argument("--val-csv", default=None)
     parser.add_argument("--test-csv", default=None)
-    parser.add_argument("--img-dir", default="data/images")
+    parser.add_argument("--img-dir", default="dataset_root/images")
     parser.add_argument("--train-img-dir", default=None)
     parser.add_argument("--val-img-dir", default=None)
     parser.add_argument("--batch-size", type=int, default=16)

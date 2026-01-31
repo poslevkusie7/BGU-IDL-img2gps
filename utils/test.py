@@ -101,7 +101,7 @@ def describe_dataset(csv_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Quick dataset stats and heuristics.")
-    parser.add_argument("--csv-path", default="data/metadata.csv")
+    parser.add_argument("--csv-path", default="dataset_root/metadata.csv")
     args = parser.parse_args()
     describe_dataset(args.csv_path)
 

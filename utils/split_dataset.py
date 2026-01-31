@@ -133,8 +133,8 @@ def main():
     parser = argparse.ArgumentParser(
         description="Split metadata CSV into train/val/test with optional grouping."
     )
-    parser.add_argument("--input-csv", default="data/metadata.csv")
-    parser.add_argument("--output-dir", default="data/splits")
+    parser.add_argument("--input-csv", default="dataset_root/metadata.csv")
+    parser.add_argument("--output-dir", default="dataset_root/splits")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--test-frac", type=float, default=TEST_FRAC)
     parser.add_argument("--val-frac", type=float, default=VAL_FRAC)
@@ -160,7 +160,7 @@ def main():
         action="store_true",
         help="Copy images into train/val/test folders (disabled by default).",
     )
-    parser.add_argument("--output-images-dir", default="data/images_split")
+    parser.add_argument("--output-images-dir", default="dataset_root/images_split")
     args = parser.parse_args()
 
     fieldnames, rows = _read_rows(args.input_csv)

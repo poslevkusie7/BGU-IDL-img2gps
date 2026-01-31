@@ -12,12 +12,12 @@ conda activate img2gps
 
 Place the dataset and checkpoint:
 ```bash
-mkdir -p data/images
-# copy images into data/images/
-# copy gt.csv into data/gt.csv
+mkdir -p dataset_root/images
+# copy images into dataset_root/images/
+# copy gt.csv into dataset_root/gt.csv
 # copy a best.pt into runs/multitask_latlon/best.pt
 ```
-If you received a zip/tar with `data/` and `runs/` folders, extract it into the repo root so the paths land in place (i.e., it should create/overwrite `data/...` and `runs/...` in this directory).
+If you received a zip/tar with `dataset_root/` and `runs/` folders, extract it into the repo root so the paths land in place (i.e., it should create/overwrite `dataset_root/...` and `runs/...` in this directory).
 
 Set the checkpoint path:
 ```bash
@@ -31,7 +31,7 @@ import numpy as np
 from PIL import Image
 from submission import predict_gps
 
-img = np.array(Image.open("data/images/example.jpg").convert("RGB"))
+img = np.array(Image.open("dataset_root/images/example.jpg").convert("RGB"))
 print(predict_gps(img))
 PY
 ```
@@ -39,8 +39,8 @@ PY
 Batch evaluation with metrics:
 ```bash
 python -m src.infer \
-  --image-dir data/images \
-  --gt-csv data/gt.csv \
+  --image-dir dataset_root/images \
+  --gt-csv dataset_root/gt.csv \
   --checkpoint runs/multitask_latlon/best.pt
 ```
 
@@ -54,7 +54,7 @@ python -m src.infer \
 - `src/` training, model, and inference code.
 - `submission.py` required `predict_gps(image)` API for automatic evaluation.
 - `config/` example training config.
-- `data/` dataset placeholders, CSVs, and splits.
+- `dataset_root/` dataset placeholders, CSVs, and splits.
 - `utils/` data prep and visualization helpers.
 - `setup.sh` conda-based environment setup.
 
@@ -67,9 +67,9 @@ dataset_root/
 ```
 
 Notes for this repo:
-- `data/images/` is the expected image folder.
-- `data/gt.csv` contains the required 3 columns: image filename, latitude, longitude.
-- `data/metadata.csv` (training CSV) includes an extra `sector_label` column for the multitask classifier.
+- `dataset_root/images/` is the expected image folder.
+- `dataset_root/gt.csv` contains the required 3 columns: image filename, latitude, longitude.
+- `dataset_root/metadata.csv` (training CSV) includes an extra `sector_label` column for the multitask classifier.
 - The full image dataset is stored on the shared drive (not in this repo).
 
 ## Environment Setup
@@ -98,8 +98,8 @@ Regression-only (lat/lon):
 ```bash
 python -m src.train \
   --task coords \
-  --csv-path data/metadata.csv \
-  --img-dir data/images \
+  --csv-path dataset_root/metadata.csv \
+  --img-dir dataset_root/images \
   --coord-mode latlon \
   --coord-norm standard \
   --batch-size 16 \
@@ -117,16 +117,16 @@ Checkpoints are saved based on the config (see `config/config.yaml`). For the de
 Batch inference + metrics:
 ```bash
 python -m src.infer \
-  --image-dir data/images \
-  --gt-csv data/gt.csv \
+  --image-dir dataset_root/images \
+  --gt-csv dataset_root/gt.csv \
   --checkpoint runs/multitask_latlon/best.pt
 ```
 
 Single image:
 ```bash
 python -m src.infer \
-  --image data/images/your_image.jpg \
-  --gt-csv data/gt.csv \
+  --image dataset_root/images/your_image.jpg \
+  --gt-csv dataset_root/gt.csv \
   --checkpoint runs/multitask_latlon/best.pt
 ```
 

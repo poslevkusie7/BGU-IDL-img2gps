@@ -1,6 +1,6 @@
 # Image-to-GPS Regression
 
-We study image-based localization on the Ben Gurion University campus by predicting geographic coordinates from a single RGB image. We consider the task as a coordinate regression using a ViT DINOv2 backbone pretrained and a lightweight regression head. We also consider a multi-head variant with the same shared encoder, but propose adding another classification head to regularize the representation. We evaluate the performance in meters using mean distance error and the percentage of predictions within 10m and 25m of the ground truth.
+We study image-based localization on the Ben Gurion University campus by predicting geographic coordinates from a single RGB image. We consider the task as a coordinate regression using a ViT DINOv2 backbone pretrained and a lightweight regression head. We also consider a multitask (multi-head) variant with the same shared encoder, but propose adding another classification head to regularize the representation. We evaluate the performance in meters using mean distance error and the percentage of predictions within 10m and 25m of the ground truth.
 
 ## Quick Start 
 Run these commands **line by line** after cloning the repo:
@@ -17,6 +17,7 @@ mkdir -p data/images
 # copy gt.csv into data/gt.csv
 # copy a best.pt into runs/multitask_latlon/best.pt
 ```
+If you received a zip/tar with `data/` and `runs/` folders, extract it into the repo root so the paths land in place (i.e., it should create/overwrite `data/...` and `runs/...` in this directory).
 
 Set the checkpoint path:
 ```bash
@@ -46,7 +47,7 @@ python -m src.infer \
 ## Overview
 - Task: regress absolute GPS latitude/longitude from a single RGB image.
 - Backbone: DINOv2 ViT (via timm) with a lightweight regression head.
-- Variant: multi-head model with an auxiliary classification head for regularization.
+- Variant: multitask (multi-head) model with an auxiliary classification head for regularization.
 - Metrics: mean/median distance error in meters, P@10m, P@25m.
 
 ## Repository Layout
@@ -68,7 +69,7 @@ dataset_root/
 Notes for this repo:
 - `data/images/` is the expected image folder.
 - `data/gt.csv` contains the required 3 columns: image filename, latitude, longitude.
-- `data/metadata.csv` (training CSV) includes an extra `sector_label` column for the multi-head classifier.
+- `data/metadata.csv` (training CSV) includes an extra `sector_label` column for the multitask classifier.
 - The full image dataset is stored on the shared drive (not in this repo).
 
 ## Environment Setup
@@ -110,7 +111,7 @@ Multi-head (classification + regression) using config:
 python -m src.train --config config/config.yaml
 ```
 
-Checkpoints are saved based on the config (see `config/config.yaml`).
+Checkpoints are saved based on the config (see `config/config.yaml`). For the default multitask run in this repo the checkpoint path is `runs/multitask_latlon/best.pt`. If you have an older checkpoint named something like `multitask_best.pt`, rename it to `best.pt` and place it under `runs/multitask_latlon/`.
 
 ## Testing / Inference
 Batch inference + metrics:

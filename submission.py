@@ -32,9 +32,8 @@ def _resolve_checkpoint():
     candidates = [
         os.environ.get("IMG2GPS_CHECKPOINT"),
         "runs/coords_latlon/best.pt",
-        "runs/coords_best.pt",
-        "runs/multitask_best.pt",
-        "checkpoints/best.pt",
+        "runs/coords_utm/best.pt",
+        "runs/multitask_latlon/best.pt",
     ]
     for candidate in candidates:
         if not candidate:
@@ -44,7 +43,7 @@ def _resolve_checkpoint():
             return path
     raise FileNotFoundError(
         "No checkpoint found. Set IMG2GPS_CHECKPOINT or place weights in "
-        "runs/coords_latlon/best.pt."
+        "runs/multitask_latlon/best.pt."
     )
 
 

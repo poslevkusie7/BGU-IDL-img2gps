@@ -15,12 +15,12 @@ Place the dataset and checkpoint:
 mkdir -p data/images
 # copy images into data/images/
 # copy gt.csv into data/gt.csv
-# copy a best.pt into runs/coords_latlon/best.pt
+# copy a best.pt into runs/multitask_latlon/best.pt
 ```
 
 Set the checkpoint path:
 ```bash
-export IMG2GPS_CHECKPOINT=runs/coords_latlon/best.pt
+export IMG2GPS_CHECKPOINT=runs/multitask_latlon/best.pt
 ```
 
 Smoke test (single image via submission API):
@@ -40,7 +40,7 @@ Batch evaluation with metrics:
 python -m src.infer \
   --image-dir data/images \
   --gt-csv data/gt.csv \
-  --checkpoint runs/coords_latlon/best.pt
+  --checkpoint runs/multitask_latlon/best.pt
 ```
 
 ## Overview
@@ -118,7 +118,7 @@ Batch inference + metrics:
 python -m src.infer \
   --image-dir data/images \
   --gt-csv data/gt.csv \
-  --checkpoint runs/coords_latlon/best.pt
+  --checkpoint runs/multitask_latlon/best.pt
 ```
 
 Single image:
@@ -126,7 +126,7 @@ Single image:
 python -m src.infer \
   --image data/images/your_image.jpg \
   --gt-csv data/gt.csv \
-  --checkpoint runs/coords_latlon/best.pt
+  --checkpoint runs/multitask_latlon/best.pt
 ```
 
 ## Submission API 
@@ -144,3 +144,21 @@ Environment variables supported:
 - `IMG2GPS_CHECKPOINT`: path to the checkpoint to load.
 - `IMG2GPS_DEVICE`: `cpu`, `cuda`, or `auto` (default `auto`).
 - `IMG2GPS_IMG_SIZE`: resize input (default `518`).
+
+## (Optional) Preparing your own dataset from photos
+
+If you have your own images with GPS EXIF data:
+
+1. Create folder `data_set` in the repo root  
+2. Put photos into numbered subfolders by region (e.g. `data_set/0/`, `data_set/1/`, …)  
+   → If you don’t need sector classification, put everything in `data_set/0/`
+
+3. Process images (orientation fix → 3:4 crop → resize to 518×690 → extract GPS):
+
+```bash
+python utils/collect_data.py
+```
+4. After that perform split with command:
+```bash
+python utils/split_dataset.py
+```

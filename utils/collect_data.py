@@ -1,31 +1,31 @@
 import os
 import csv
-import shutil
-from PIL import Image
+from PIL import Image, ImageOps
 from PIL.ExifTags import GPSTAGS
 from PIL.TiffImagePlugin import IFDRational
-
+from tqdm import tqdm
 import pillow_heif
+
 pillow_heif.register_heif_opener()
 
 # ================= CONFIG =================
 
-ROOT_FOLDER      = "."
-TEMP_FOLDER      = "_tmp_flat"
-RESIZED_FOLDER   = "resized"
-CSV_FILE         = "labels.csv"
-TARGET_SHORT_SIDE = 518
+ROOT_FOLDER       = "data_set"        # input images: data_set/<region>/<image>
+RESIZED_FOLDER    = "data/images"     # final images
+CSV_FILE          = "data/metadata.csv"     # CSV output
+TARGET_WIDTH      = 518               # final width (3:4 → height = 690)
 
 # CSV Columns
 FILE_NAME = "image_id"
-REGION = "sector_label"
-LAT = "lat"
-LON = "lon"
+REGION    = "sector_label"
+LAT       = "lat"
+LON       = "lon"
 
 # =========================================
 
 
 def get_gps(img_path):
+    """Extract GPS coordinates from original image EXIF"""
     try:
         with Image.open(img_path) as img:
             exif = img.getexif()
@@ -36,11 +36,9 @@ def get_gps(img_path):
             if not gps_ifd:
                 return None, None
 
-            gps = {}
-            for k, v in gps_ifd.items():
-                gps[GPSTAGS.get(k, k)] = v
+            gps = {GPSTAGS.get(k, k): v for k, v in gps_ifd.items()}
 
-            if not all(x in gps for x in (
+            if not all(k in gps for k in (
                 "GPSLatitude", "GPSLatitudeRef",
                 "GPSLongitude", "GPSLongitudeRef"
             )):
@@ -68,75 +66,92 @@ def get_gps(img_path):
         return None, None
 
 
-def extract_region(filename):
-    # expects region_<i>_....
-    parts = filename.split("_", 2)
-    if len(parts) >= 2 and parts[0] == "region":
-        return parts[1]
-    return None
-
-
-def resize_image(img, target):
+def crop_to_3_4_vertical(img):
+    """Center-crop to strict 3:4 vertical (W:H = 3:4)"""
     w, h = img.size
-    scale = target / min(w, h)
-    return img.resize((int(w * scale), int(h * scale)),
-                      Image.Resampling.LANCZOS)
+    target_ratio = 4 / 3        # H / W
+    current_ratio = h / w
+
+    if current_ratio > target_ratio:
+        new_h = int(w * target_ratio)
+        top = (h - new_h) // 2
+        img = img.crop((0, top, w, top + new_h))
+    elif current_ratio < target_ratio:
+        new_w = int(h / target_ratio)
+        left = (w - new_w) // 2
+        img = img.crop((left, 0, left + new_w, h))
+
+    return img
 
 
-def stage1_flatten():
-    os.makedirs(TEMP_FOLDER, exist_ok=True)
+def resize_to_width(img, target_width):
+    w, h = img.size
+    scale = target_width / w
+    return img.resize(
+        (target_width, int(h * scale)),
+        Image.Resampling.LANCZOS
+    )
 
-    for region in sorted(os.listdir(ROOT_FOLDER)):
+
+def process_images():
+    os.makedirs(RESIZED_FOLDER, exist_ok=True)
+    os.makedirs(os.path.dirname(CSV_FILE), exist_ok=True)
+
+    rows = []
+
+    regions = sorted(
+        d for d in os.listdir(ROOT_FOLDER)
+        if d.isdigit() and os.path.isdir(os.path.join(ROOT_FOLDER, d))
+    )
+
+    for region in tqdm(regions, desc="Regions"):
         region_path = os.path.join(ROOT_FOLDER, region)
-        if not region.isdigit() or not os.path.isdir(region_path):
-            continue
 
-        for fname in os.listdir(region_path):
-            if not fname.lower().endswith((".jpg", ".jpeg", ".png", ".heic")):
-                continue
+        files = sorted(
+            f for f in os.listdir(region_path)
+            if f.lower().endswith((".jpg", ".jpeg", ".png", ".heic"))
+        )
 
+        for fname in tqdm(files, desc=f"Region {region}", leave=False):
             src = os.path.join(region_path, fname)
             base = os.path.splitext(fname)[0]
             out_name = f"region_{region}_{base}.jpg"
-            dst = os.path.join(TEMP_FOLDER, out_name)
+            dst = os.path.join(RESIZED_FOLDER, out_name)
 
-            with Image.open(src) as img:
-                exif = img.getexif()
-                img = img.convert("RGB")
-                img.save(dst, exif=exif, quality=95)
+            try:
+                with Image.open(src) as img:
+                    exif = img.getexif()
 
+                    # 1) Fix orientation ONCE
+                    img = ImageOps.exif_transpose(img)
+                    img = img.convert("RGB")
 
-def stage2_process():
-    os.makedirs(RESIZED_FOLDER, exist_ok=True)
-    rows = []
+                    # Remove EXIF orientation to avoid double rotation
+                    if 274 in exif:   # Orientation tag
+                        del exif[274]
 
-    for fname in sorted(os.listdir(TEMP_FOLDER)):
-        src = os.path.join(TEMP_FOLDER, fname)
+                    # 2) Force 3:4 vertical crop
+                    img = crop_to_3_4_vertical(img)
 
-        region = extract_region(fname)
-        if region is None:
-            continue
+                    # 3) Resize → 518 × 690
+                    img = resize_to_width(img, TARGET_WIDTH)
 
-        lat, lon = get_gps(src)
+                    img.save(dst, exif=exif, quality=92, optimize=True)
 
-        with Image.open(src) as img:
-            exif = img.getexif()
-            resized = resize_image(img, TARGET_SHORT_SIDE)
-            resized.save(
-                os.path.join(RESIZED_FOLDER, fname),
-                exif=exif,
-                quality=92,
-                optimize=True
-            )
-            
-        if lat is not None and lon is not None:
-            rows.append([
-                fname,
-                region,
-                f"{lat:.8f}",
-                f"{lon:.8f}"
-            ])
+                # GPS from original image
+                lat, lon = get_gps(src)
+                if lat is not None and lon is not None:
+                    rows.append([
+                        out_name,
+                        region,
+                        f"{lat:.8f}",
+                        f"{lon:.8f}"
+                    ])
 
+            except Exception as e:
+                print(f"Failed {src}: {e}")
+
+    # Write CSV
     with open(CSV_FILE, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow([FILE_NAME, REGION, LAT, LON])
@@ -144,18 +159,11 @@ def stage2_process():
 
 
 def main():
-    print("Stage 1: flatten & rename")
-    stage1_flatten()
-
-    print("Stage 2: resize + GPS + CSV")
-    stage2_process()
-
-    print("Cleanup")
-    shutil.rmtree(TEMP_FOLDER)
-
+    print("Processing images: orientation → 3:4 crop → resize → GPS → CSV")
+    process_images()
     print("DONE")
-    print(f"Resized images → {RESIZED_FOLDER}")
-    print(f"CSV labels     → {CSV_FILE}")
+    print(f"Images → {RESIZED_FOLDER}")
+    print(f"CSV    → {CSV_FILE}")
 
 
 if __name__ == "__main__":

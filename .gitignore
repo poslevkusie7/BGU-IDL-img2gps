@@ -11,3 +11,4 @@ checkpoints/
 *.pt
 *.htmldata/images.zip
 data/processed_images/
+data_set

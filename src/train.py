@@ -705,7 +705,7 @@ def run_training(args):
                     if epoch is not None:
                         payload["epoch"] = epoch
                     torch.save(payload, path)
-                    log_fn(f"Saved best checkpoint to {path} (metric={metric:.4f})")
+                    log_fn(f"Saved best checkpoint to {path} (z={metric:.4f})")
 
             return save
 

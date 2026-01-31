@@ -6,6 +6,10 @@ import random
 import shutil
 from pathlib import Path
 
+# Split settings:
+TEST_FRAC = 0.0
+VAL_FRAC = 0.1
+
 
 def _read_rows(csv_path):
     with open(csv_path, newline="", encoding="utf-8") as handle:
@@ -132,8 +136,8 @@ def main():
     parser.add_argument("--input-csv", default="data/metadata.csv")
     parser.add_argument("--output-dir", default="data/splits")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--test-frac", type=float, default=0.2)
-    parser.add_argument("--val-frac", type=float, default=0.2)
+    parser.add_argument("--test-frac", type=float, default=TEST_FRAC)
+    parser.add_argument("--val-frac", type=float, default=VAL_FRAC)
     parser.add_argument(
         "--val-from-train",
         action="store_true",

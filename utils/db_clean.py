@@ -70,8 +70,8 @@ def clean_with_dbscan(input_csv, output_csv, output_html, eps_meters=10.0, min_s
 
 def main():
     parser = argparse.ArgumentParser(description="DBSCAN-based GPS outlier removal.")
-    parser.add_argument("--input-csv", default="data/metadata.csv")
-    parser.add_argument("--output-csv", default="data/metadata1.csv")
+    parser.add_argument("--input-csv", default="dataset_root/metadata.csv")
+    parser.add_argument("--output-csv", default="dataset_root/metadata1.csv")
     parser.add_argument("--output-html", default="clustered_map.html")
     parser.add_argument("--eps-meters", type=float, default=10.0, help="Neighborhood radius in meters.")
     parser.add_argument(

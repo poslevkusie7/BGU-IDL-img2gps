@@ -11,8 +11,8 @@ pillow_heif.register_heif_opener()
 # ================= CONFIG =================
 
 ROOT_FOLDER       = "data_set"        # input images: data_set/<region>/<image>
-RESIZED_FOLDER    = "data/images"     # final images
-CSV_FILE          = "data/metadata.csv"     # CSV output
+RESIZED_FOLDER    = "dataset_root/images"     # final images
+CSV_FILE          = "dataset_root/metadata.csv"     # CSV output
 TARGET_WIDTH      = 518               # final width (3:4 → height = 690)
 
 # CSV Columns
